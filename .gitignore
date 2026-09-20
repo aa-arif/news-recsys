@@ -1,0 +1,51 @@
+# --- markdown: only README.md is tracked -----------------------------------
+*.md
+!README.md
+
+# --- data & model artifacts (never committed) -------------------------------
+/data/
+/artifacts/
+*.zip
+*.tsv
+*.parquet
+*.npy
+*.npz
+*.bin
+*.onnx
+*.faiss
+*.index
+*.pkl
+*.txt.gz
+
+# --- results: metrics + figures are tracked, raw logs are not ---------------
+results/logs/
+results/**/*.csv
+
+# --- secrets ----------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.token
+
+# --- python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# --- editors / os -----------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# synthetic pipeline outputs are not real results
+results/metrics/*_synthetic.json

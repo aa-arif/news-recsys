@@ -1,0 +1,21 @@
+{
+  "validation_day": "2019-11-11",
+  "folds": {
+    "train": {
+      "impressions": 400,
+      "time_min": "2019-11-09 00:08:01",
+      "time_max": "2019-11-10 23:58:52"
+    },
+    "val": {
+      "impressions": 200,
+      "time_min": "2019-11-11 00:06:09",
+      "time_max": "2019-11-11 23:55:06"
+    },
+    "test": {
+      "impressions": 200,
+      "time_min": "2019-11-12 00:04:39",
+      "time_max": "2019-11-12 23:46:03"
+    }
+  },
+  "policy": "test = MIND-small dev split (sealed); val = last calendar day of MIND-small train; train = everything earlier. No random splits."
+}

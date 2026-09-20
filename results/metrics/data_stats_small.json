@@ -1,0 +1,97 @@
+{
+  "dataset": "small",
+  "news": {
+    "articles": 65238,
+    "categories": 18,
+    "subcategories": 270,
+    "empty_abstract_share": 0.052346791747141234,
+    "mean_title_chars": 66.27545295686564,
+    "mean_abstract_chars": 208.19877985223337
+  },
+  "folds": {
+    "train": {
+      "impressions": 126695,
+      "events": 4621015,
+      "positives": 189519,
+      "positive_rate": 0.04101241826741527,
+      "users": 46012,
+      "articles_in_slates": 16978,
+      "mean_slate_size": 36.47353881368641,
+      "mean_positives_per_impression": 1.4958680295197126,
+      "mean_history_len": 32.408271833931884,
+      "median_history_len": 19.0,
+      "empty_history_share": 0.019464067248115554,
+      "time_min": "2019-11-09 00:00:19",
+      "time_max": "2019-11-13 23:59:21"
+    },
+    "val": {
+      "impressions": 30270,
+      "events": 1222429,
+      "positives": 46825,
+      "positive_rate": 0.03830488314658766,
+      "users": 20179,
+      "articles_in_slates": 6144,
+      "mean_slate_size": 40.38417575156921,
+      "mean_positives_per_impression": 1.5469111331351173,
+      "mean_history_len": 33.09127849355798,
+      "median_history_len": 20.0,
+      "empty_history_share": 0.02550379914106376,
+      "time_min": "2019-11-14 00:00:00",
+      "time_max": "2019-11-14 23:59:13"
+    },
+    "test": {
+      "impressions": 73152,
+      "events": 2740998,
+      "positives": 111383,
+      "positive_rate": 0.040635928957263014,
+      "users": 50000,
+      "articles_in_slates": 5369,
+      "mean_slate_size": 37.469898293963254,
+      "mean_positives_per_impression": 1.5226241251093613,
+      "mean_history_len": 32.29595909886264,
+      "median_history_len": 19.0,
+      "empty_history_share": 0.03026574803149606,
+      "time_min": "2019-11-15 00:00:01",
+      "time_max": "2019-11-15 23:58:03"
+    }
+  },
+  "cold_start": {
+    "train_articles_in_slates": 16978,
+    "train_articles_in_slates_or_history": 47538,
+    "val_vs_train_slates": {
+      "articles": 6144,
+      "cold_articles": 3310,
+      "cold_article_share": 0.5387369791666666,
+      "cold_event_share": 0.29219692922860957,
+      "cold_click_share": 0.36924719701014413
+    },
+    "val_vs_train_slates_or_history": {
+      "articles": 6144,
+      "cold_articles": 3259,
+      "cold_article_share": 0.5304361979166666,
+      "cold_event_share": 0.2858292792464838,
+      "cold_click_share": 0.36222103577148956
+    },
+    "test_vs_train_slates": {
+      "articles": 5369,
+      "cold_articles": 3810,
+      "cold_article_share": 0.7096293536971503,
+      "cold_event_share": 0.8064985819033798,
+      "cold_click_share": 0.8682653546771051
+    },
+    "test_vs_train_slates_or_history": {
+      "articles": 5369,
+      "cold_articles": 3749,
+      "cold_article_share": 0.6982678338610542,
+      "cold_event_share": 0.782312135944645,
+      "cold_click_share": 0.8426689889839563
+    }
+  },
+  "users": {
+    "train_users": 46012,
+    "test_users": 50000,
+    "test_users_unseen_in_train": 44470,
+    "test_users_unseen_in_train_share": 0.8894,
+    "val_users_unseen_in_train_share": 0.19763120075325835
+  }
+}
