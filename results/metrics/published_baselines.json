@@ -1,0 +1,84 @@
+{
+  "dataset": "MIND-small dev split",
+  "units": "percent, as printed in the cited tables",
+  "sources": {
+    "digat": {
+      "title": "DIGAT: Modeling News Recommendation with Dual-Graph Interaction",
+      "arxiv": "2210.05196",
+      "url": "https://arxiv.org/abs/2210.05196",
+      "table": "Table 1 (MIND-small)",
+      "retrieved": "2026-09-20"
+    },
+    "pointwise_pairwise": {
+      "title": "Efficient Pointwise-Pairwise Learning-to-Rank for News Recommendation",
+      "arxiv": "2409.17711",
+      "url": "https://arxiv.org/abs/2409.17711",
+      "table": "main results table; evaluation set stated as 73,152 impressions",
+      "retrieved": "2026-09-20"
+    }
+  },
+  "results": [
+    {
+      "model": "NAML",
+      "auc": 66.12,
+      "mrr": 31.53,
+      "ndcg@5": 34.88,
+      "ndcg@10": 41.09,
+      "source": "digat"
+    },
+    {
+      "model": "LSTUR",
+      "auc": 65.87,
+      "mrr": 30.78,
+      "ndcg@5": 33.95,
+      "ndcg@10": 40.15,
+      "source": "digat"
+    },
+    {
+      "model": "NRMS",
+      "auc": 65.63,
+      "mrr": 30.96,
+      "ndcg@5": 34.13,
+      "ndcg@10": 40.52,
+      "source": "digat"
+    },
+    {
+      "model": "DIGAT",
+      "auc": 68.77,
+      "mrr": 33.46,
+      "ndcg@5": 37.14,
+      "ndcg@10": 43.39,
+      "source": "digat"
+    },
+    {
+      "model": "BERT-NRMS",
+      "auc": 68.6,
+      "mrr": 32.97,
+      "ndcg@5": 36.55,
+      "ndcg@10": 42.78,
+      "source": "pointwise_pairwise"
+    },
+    {
+      "model": "Prompt4NR",
+      "auc": 68.48,
+      "mrr": 33.29,
+      "ndcg@5": 37.12,
+      "ndcg@10": 43.25,
+      "source": "pointwise_pairwise"
+    },
+    {
+      "model": "UniTRec",
+      "auc": 68.59,
+      "mrr": 33.76,
+      "ndcg@5": 37.63,
+      "ndcg@10": 43.74,
+      "source": "pointwise_pairwise"
+    }
+  ],
+  "caveats": [
+    "Published numbers are transcribed from the cited tables, not reproduced here.",
+    "Both sources evaluate on MIND-small dev; one states the evaluation set has 73,152 impressions, matching this repo's sealed test fold exactly.",
+    "Those models train on all of MIND-small train; this repo holds out its last calendar day for validation and therefore trains on less data.",
+    "Those models are content-only neural rankers. The models here also use time-aware popularity/CTR counters computed causally from earlier events - a different information set, which is the most likely explanation for any gap in either direction."
+  ]
+}
