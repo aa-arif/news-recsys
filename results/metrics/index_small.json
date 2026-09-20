@@ -1,0 +1,9 @@
+{
+  "dataset": "small",
+  "vectors": 65238,
+  "dim": 128,
+  "hnsw_m": 32,
+  "ef_construction": 200,
+  "build_seconds": 8.147425100032706,
+  "index_megabytes": 48.79
+}

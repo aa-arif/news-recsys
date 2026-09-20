@@ -1,0 +1,109 @@
+{
+  "dataset": "small",
+  "config": {
+    "text_dim": 384,
+    "category_dim": 32,
+    "subcategory_dim": 32,
+    "hidden_dim": 256,
+    "output_dim": 128,
+    "attention_dim": 64,
+    "dropout": 0.1,
+    "temperature": 0.05
+  },
+  "epochs": 6,
+  "batch_size": 1024,
+  "learning_rate": 0.002,
+  "max_history": 50,
+  "train_clicks": 189519,
+  "val_clicks": 46825,
+  "train_seconds": 1467.6035959,
+  "torch_threads": 10,
+  "selection": {
+    "best_epoch": 5,
+    "best_val_recall@100": 0.0356,
+    "val_subsample": 5000,
+    "epochs": [
+      {
+        "epoch": 0,
+        "loss": 8.114787232491278,
+        "val_recall@10": 0.0036,
+        "val_recall@100": 0.0162
+      },
+      {
+        "epoch": 1,
+        "loss": 7.4891825465745825,
+        "val_recall@10": 0.0046,
+        "val_recall@100": 0.0268
+      },
+      {
+        "epoch": 2,
+        "loss": 7.206055805247317,
+        "val_recall@10": 0.0042,
+        "val_recall@100": 0.0172
+      },
+      {
+        "epoch": 3,
+        "loss": 7.028721360750096,
+        "val_recall@10": 0.006,
+        "val_recall@100": 0.021
+      },
+      {
+        "epoch": 4,
+        "loss": 6.923310851538053,
+        "val_recall@10": 0.0078,
+        "val_recall@100": 0.0288
+      },
+      {
+        "epoch": 5,
+        "loss": 6.842296338850452,
+        "val_recall@10": 0.0084,
+        "val_recall@100": 0.0356
+      }
+    ]
+  },
+  "training_curve": [
+    {
+      "epoch": 0,
+      "loss": 8.114787232491278,
+      "val_recall@10": 0.0036,
+      "val_recall@100": 0.0162
+    },
+    {
+      "epoch": 1,
+      "loss": 7.4891825465745825,
+      "val_recall@10": 0.0046,
+      "val_recall@100": 0.0268
+    },
+    {
+      "epoch": 2,
+      "loss": 7.206055805247317,
+      "val_recall@10": 0.0042,
+      "val_recall@100": 0.0172
+    },
+    {
+      "epoch": 3,
+      "loss": 7.028721360750096,
+      "val_recall@10": 0.006,
+      "val_recall@100": 0.021
+    },
+    {
+      "epoch": 4,
+      "loss": 6.923310851538053,
+      "val_recall@10": 0.0078,
+      "val_recall@100": 0.0288
+    },
+    {
+      "epoch": 5,
+      "loss": 6.842296338850452,
+      "val_recall@10": 0.0084,
+      "val_recall@100": 0.0356
+    }
+  ],
+  "item_vectors": {
+    "path": "artifacts\\small\\item_vectors.npy",
+    "shape": [
+      65238,
+      128
+    ]
+  }
+}
