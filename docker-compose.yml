@@ -1,0 +1,33 @@
+# API + Redis. Artifacts and processed data are mounted read-only from the host: they are
+# produced by the offline pipeline (make m1 m2 m3 m4) and are gitignored.
+services:
+  redis:
+    image: redis:7-alpine
+    # No persistence: every key here is derived state that `make seed` can rebuild.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      NEWSREC_REDIS_URL: redis://redis:6379/0
+      NEWSREC_DATASET: ${NEWSREC_DATASET:-small}
+      NEWSREC_ORT_INTRA_OP_THREADS: ${NEWSREC_ORT_INTRA_OP_THREADS:-2}
+      NEWSREC_USER_EMBEDDING_CACHE_SIZE: ${NEWSREC_USER_EMBEDDING_CACHE_SIZE:-0}
+    volumes:
+      - ./artifacts:/app/artifacts:ro
+      - ./data/processed:/app/data/processed:ro
+      - ./results:/app/results
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy

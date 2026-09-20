@@ -113,14 +113,17 @@ compose-down: ## stop the docker stack
 	docker compose down
 
 # --- M6: load test ----------------------------------------------------------
-.PHONY: m6 loadtest loadtest-tuned
-m6: loadtest ## milestone 6: latency vs QPS ladder (server must be running)
+.PHONY: m6 loadtest loadtest-tuned loadsuite
+m6: loadsuite ## milestone 6: latency vs QPS ladder (server must be running)
 
 loadtest: ## locust ladder against the running server
 	$(PY) scripts/load_test.py --dataset $(DATASET) --label baseline
 
 loadtest-tuned: ## same ladder with the tuned configuration
 	$(PY) scripts/load_test.py --dataset $(DATASET) --label tuned
+
+loadsuite: ## start the server per configuration and run every ladder (baseline vs tuned)
+	$(PY) scripts/run_load_suite.py --dataset $(DATASET)
 
 # --- M7: stretch ------------------------------------------------------------
 .PHONY: m7 rerank

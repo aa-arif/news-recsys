@@ -1,0 +1,15 @@
+{
+  "as_of": 1573776001.0,
+  "dataset": "small",
+  "articles": 20288,
+  "users": 50000,
+  "categories": 18,
+  "subcategories": 270,
+  "counter_seconds": 0.8153495999868028,
+  "histories": 50000,
+  "history_seconds": 2.488942199968733,
+  "history_fold": "test",
+  "redis_used_memory_mb": 30.25,
+  "redis_keys": 119169,
+  "seeded_at": 1789934660.824623
+}

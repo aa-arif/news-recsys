@@ -55,7 +55,15 @@ jobs:
       - name: Install project
         run: uv sync --extra dev --frozen
 
+      - name: Cache the sentence-transformer
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ hashFiles('pyproject.toml') }}
+
       - name: End-to-end smoke on synthetic data
+        # Downloads MiniLM, then runs every pipeline stage (parse, features, baselines,
+        # two-tower, FAISS, ranker, ONNX export, MMR) on the synthetic dataset.
         run: make smoke
 
       - name: Upload smoke artifacts

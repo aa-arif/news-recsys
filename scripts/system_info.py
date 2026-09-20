@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import platform
 import sys
+from pathlib import Path
 from typing import Any
 
 from news_recsys.config import get_settings
@@ -42,7 +43,7 @@ def cpu_name() -> str:
             pass
     if platform.system() == "Linux":
         try:
-            with open("/proc/cpuinfo", encoding="utf-8") as handle:
+            with Path("/proc/cpuinfo").open(encoding="utf-8") as handle:
                 for line in handle:
                     if line.startswith("model name"):
                         return line.split(":", 1)[1].strip()

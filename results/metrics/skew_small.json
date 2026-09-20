@@ -1,0 +1,14 @@
+{
+  "dataset": "small",
+  "host": "http://127.0.0.1:8000",
+  "as_of": 1573776001.0,
+  "requests_compared": 200,
+  "rows_compared": 5426,
+  "features_per_row": 35,
+  "values_compared": 189910,
+  "mismatched_requests": 0,
+  "max_abs_difference": 0.0,
+  "worst_feature": null,
+  "exact_match": true,
+  "examples": []
+}
