@@ -56,12 +56,14 @@ def _auth_headers(settings: Settings) -> dict[str, str]:
     if not settings.hf_token:
         raise DatasetAccessError(
             "NEWSREC_HF_TOKEN is not set. Accept the license at "
-            f"https://huggingface.co/datasets/yjw1029/MIND and put a read token in .env"
+            "https://huggingface.co/datasets/yjw1029/MIND and put a read token in .env"
         )
     return {"Authorization": f"Bearer {settings.hf_token}"}
 
 
-def download_split(split: str, settings: Settings | None = None, *, force: bool = False) -> DownloadResult:
+def download_split(
+    split: str, settings: Settings | None = None, *, force: bool = False
+) -> DownloadResult:
     """Download and extract one MIND split. Idempotent: re-runs are no-ops."""
     settings = settings or get_settings()
     settings.ensure_dirs()
@@ -74,12 +76,16 @@ def download_split(split: str, settings: Settings | None = None, *, force: bool 
     already_extracted = all((extract_dir / name).exists() for name in SPLIT_FILES)
     if already_extracted and not force:
         logger.info("%s already extracted at %s", split, extract_dir)
-        return DownloadResult(split, zip_path, extract_dir, zip_path.stat().st_size if zip_path.exists() else 0, True)
+        return DownloadResult(
+            split, zip_path, extract_dir, zip_path.stat().st_size if zip_path.exists() else 0, True
+        )
 
     if not zip_path.exists() or force or (expected and zip_path.stat().st_size != expected):
         url = f"{HF_BASE_URL}/{zip_name}"
         logger.info("downloading %s -> %s", url, zip_path)
-        with requests.get(url, headers=_auth_headers(settings), stream=True, timeout=120) as response:
+        with requests.get(
+            url, headers=_auth_headers(settings), stream=True, timeout=120
+        ) as response:
             if response.status_code in (401, 403):
                 raise DatasetAccessError(
                     f"HTTP {response.status_code} for {zip_name}: the token cannot read the gated "

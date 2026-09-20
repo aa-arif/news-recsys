@@ -86,11 +86,18 @@ class Settings(BaseSettings):
     retrieval_candidates: int = 200
 
     # ---- ranking -----------------------------------------------------------
-    ranker_epochs: int = 2
-    ranker_batch_size: int = 1024
+    ranker_epochs: int = 3
+    ranker_impressions_per_batch: int = 64
     ranker_lr: float = 1e-3
-    ranker_negative_sample_rate: float = 1.0  # 1.0 == keep every shown-not-clicked row
-    ranker_attention_dim: int = 64
+    #: Shown-but-not-clicked rows kept per impression during training. Positives are
+    #: always kept; the resulting calibration bias is corrected in closed form at
+    #: inference (see models/calibration.py).
+    ranker_negative_sample_rate: float = 0.25
+    #: The ranker attends over a shorter history than retrieval: target attention costs
+    #: one MLP evaluation per (candidate, history item) pair, which dominates CPU time.
+    ranker_max_history: int = 30
+    ranker_item_dim: int = 64
+    ranker_attention_dim: int = 32
     ranker_cross_layers: int = 3
     ranker_mlp_dims: tuple[int, ...] = (256, 128, 64)
     ranker_dropout: float = 0.1

@@ -41,7 +41,9 @@ def assign_folds(settings: Settings | None = None) -> pl.DataFrame:
     train_impressions = pl.read_parquet(processed / "impressions_train.parquet").select(
         "impression_key", "time"
     )
-    dev_impressions = pl.read_parquet(processed / "impressions_dev.parquet").select("impression_key", "time")
+    dev_impressions = pl.read_parquet(processed / "impressions_dev.parquet").select(
+        "impression_key", "time"
+    )
 
     last_train_day: date = train_impressions.select(pl.col("time").dt.date().max()).item()
     logger.info("validation day (last day of MIND train): %s", last_train_day)
@@ -73,10 +75,18 @@ def assign_folds(settings: Settings | None = None) -> pl.DataFrame:
         ),
     }
     settings.metrics_dir.mkdir(parents=True, exist_ok=True)
-    (settings.metrics_dir / "splits.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (settings.metrics_dir / "splits.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
     for fold in FOLDS:
         info = manifest["folds"][fold]
-        logger.info("%-5s %7d impressions  %s .. %s", fold, info["impressions"], info["time_min"], info["time_max"])
+        logger.info(
+            "%-5s %7d impressions  %s .. %s",
+            fold,
+            info["impressions"],
+            info["time_min"],
+            info["time_max"],
+        )
     return folds
 
 
@@ -92,14 +102,18 @@ def _raw_split_for(fold: str) -> str:
     return "dev" if fold == "test" else "train"
 
 
-def load_events(fold: str, settings: Settings | None = None, *, columns: list[str] | None = None) -> pl.DataFrame:
+def load_events(
+    fold: str, settings: Settings | None = None, *, columns: list[str] | None = None
+) -> pl.DataFrame:
     """Load the exploded (impression, news, label) rows for one fold, time-ordered."""
     settings = settings or get_settings()
     if fold not in FOLDS:
         raise ValueError(f"unknown fold {fold!r}; expected one of {FOLDS}")
     keys = load_folds(settings).filter(pl.col("fold") == fold).select("impression_key")
     events = pl.read_parquet(_processed(settings) / f"events_{_raw_split_for(fold)}.parquet")
-    events = events.join(keys, on="impression_key", how="semi").sort(["time", "impression_key", "position"])
+    events = events.join(keys, on="impression_key", how="semi").sort(
+        ["time", "impression_key", "position"]
+    )
     return events.select(columns) if columns else events
 
 
@@ -109,7 +123,9 @@ def load_impressions(fold: str, settings: Settings | None = None) -> pl.DataFram
     if fold not in FOLDS:
         raise ValueError(f"unknown fold {fold!r}; expected one of {FOLDS}")
     keys = load_folds(settings).filter(pl.col("fold") == fold).select("impression_key")
-    impressions = pl.read_parquet(_processed(settings) / f"impressions_{_raw_split_for(fold)}.parquet")
+    impressions = pl.read_parquet(
+        _processed(settings) / f"impressions_{_raw_split_for(fold)}.parquet"
+    )
     return impressions.join(keys, on="impression_key", how="semi").sort(["time", "impression_key"])
 
 
@@ -123,12 +139,13 @@ def load_all_events(settings: Settings | None = None) -> pl.DataFrame:
     settings = settings or get_settings()
     folds = load_folds(settings)
     frames = [
-        pl.read_parquet(_processed(settings) / f"events_{split}.parquet") for split in ("train", "dev")
+        pl.read_parquet(_processed(settings) / f"events_{split}.parquet")
+        for split in ("train", "dev")
     ]
     events = pl.concat(frames, how="vertical")
-    return events.join(folds.select("impression_key", "fold"), on="impression_key", how="inner").sort(
-        ["time", "impression_key", "position"]
-    )
+    return events.join(
+        folds.select("impression_key", "fold"), on="impression_key", how="inner"
+    ).sort(["time", "impression_key", "position"])
 
 
 def load_news(settings: Settings | None = None) -> pl.DataFrame:

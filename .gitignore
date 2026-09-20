@@ -49,3 +49,4 @@ Thumbs.db
 
 # synthetic pipeline outputs are not real results
 results/metrics/*_synthetic.json
+results/figures/*_synthetic.png

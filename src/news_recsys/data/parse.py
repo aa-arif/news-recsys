@@ -44,9 +44,9 @@ BEHAVIOR_COLUMNS = ["impression_id", "user_id", "time", "history", "impressions"
 
 def impression_key(split: str, impression_id: pl.Expr) -> pl.Expr:
     """Globally unique impression key: ``split_code * 1e9 + impression_id``."""
-    return (pl.lit(SPLIT_CODES[split] * 1_000_000_000, dtype=pl.Int64) + impression_id.cast(pl.Int64)).alias(
-        "impression_key"
-    )
+    return (
+        pl.lit(SPLIT_CODES[split] * 1_000_000_000, dtype=pl.Int64) + impression_id.cast(pl.Int64)
+    ).alias("impression_key")
 
 
 def parse_news(path: Path, split: str) -> pl.DataFrame:
@@ -57,7 +57,7 @@ def parse_news(path: Path, split: str) -> pl.DataFrame:
         has_header=False,
         new_columns=NEWS_COLUMNS,
         quote_char=None,
-        schema_overrides={name: pl.Utf8 for name in NEWS_COLUMNS},
+        schema_overrides=dict.fromkeys(NEWS_COLUMNS, pl.Utf8),
     )
     return frame.select(
         pl.col("news_id"),
@@ -67,8 +67,14 @@ def parse_news(path: Path, split: str) -> pl.DataFrame:
         pl.col("abstract").fill_null(""),
         pl.col("url").fill_null(""),
         # ``[]`` is an empty entity list; count objects by counting '"Label"' keys.
-        pl.col("title_entities").fill_null("[]").str.count_matches(r'"Label"').alias("n_title_entities"),
-        pl.col("abstract_entities").fill_null("[]").str.count_matches(r'"Label"').alias("n_abstract_entities"),
+        pl.col("title_entities")
+        .fill_null("[]")
+        .str.count_matches(r'"Label"')
+        .alias("n_title_entities"),
+        pl.col("abstract_entities")
+        .fill_null("[]")
+        .str.count_matches(r'"Label"')
+        .alias("n_abstract_entities"),
         pl.lit(split).alias("source_split"),
     )
 
@@ -127,7 +133,13 @@ def parse_behaviors(path: Path, split: str) -> tuple[pl.DataFrame, pl.DataFrame]
             pl.col("slate").str.split("-").list.get(1).cast(pl.Int8).alias("label"),
         )
         .drop("slate")
-        .with_columns(pl.col("impression_key").cum_count().over("impression_key").cast(pl.Int16).alias("position"))
+        .with_columns(
+            pl.col("impression_key")
+            .cum_count()
+            .over("impression_key")
+            .cast(pl.Int16)
+            .alias("position")
+        )
     )
 
     n_missing_label = int(events.select(pl.col("label").is_null().sum()).item())
@@ -140,7 +152,9 @@ def parse_behaviors(path: Path, split: str) -> tuple[pl.DataFrame, pl.DataFrame]
     )
 
 
-def build_parquet(raw_dir: Path, processed_dir: Path, splits: tuple[str, ...] = ("train", "dev")) -> dict[str, Path]:
+def build_parquet(
+    raw_dir: Path, processed_dir: Path, splits: tuple[str, ...] = ("train", "dev")
+) -> dict[str, Path]:
     """Convert every split's TSVs to Parquet and write a deduplicated news catalogue."""
     processed_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
@@ -164,7 +178,9 @@ def build_parquet(raw_dir: Path, processed_dir: Path, splits: tuple[str, ...] = 
         )
         news_frames.append(parse_news(split_dir / "news.tsv", split))
 
-    news = pl.concat(news_frames, how="vertical").unique(subset=["news_id"], keep="first", maintain_order=True)
+    news = pl.concat(news_frames, how="vertical").unique(
+        subset=["news_id"], keep="first", maintain_order=True
+    )
     news_path = processed_dir / "news.parquet"
     news.write_parquet(news_path, compression="zstd")
     written["news"] = news_path

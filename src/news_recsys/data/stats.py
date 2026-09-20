@@ -30,7 +30,9 @@ def _fold_stats(fold: str, settings: Settings) -> dict[str, Any]:
         "mean_positives_per_impression": positives / max(impressions.height, 1),
         "mean_history_len": float(history_lengths.select(pl.col("n_history").mean()).item()),
         "median_history_len": float(history_lengths.select(pl.col("n_history").median()).item()),
-        "empty_history_share": float(history_lengths.select((pl.col("n_history") == 0).mean()).item()),
+        "empty_history_share": float(
+            history_lengths.select((pl.col("n_history") == 0).mean()).item()
+        ),
         "time_min": str(impressions.select(pl.col("time").min()).item()),
         "time_max": str(impressions.select(pl.col("time").max()).item()),
     }
@@ -51,7 +53,9 @@ def _seen_article_sets(settings: Settings) -> tuple[set[str], set[str]]:
 
     train_impressions = load_impressions("train", settings)
     history_seen = set(
-        train_impressions.select(pl.col("history").explode().drop_nulls().unique())["history"].to_list()
+        train_impressions.select(pl.col("history").explode().drop_nulls().unique())[
+            "history"
+        ].to_list()
     )
     return slate_seen, slate_seen | history_seen
 
@@ -68,10 +72,15 @@ def _cold_start_stats(settings: Settings) -> dict[str, Any]:
         articles = events["news_id"].unique().to_list()
         n_articles = len(articles)
 
-        for label, seen in (("vs_train_slates", slate_seen), ("vs_train_slates_or_history", seen_or_history)):
+        for label, seen in (
+            ("vs_train_slates", slate_seen),
+            ("vs_train_slates_or_history", seen_or_history),
+        ):
             unseen = [article for article in articles if article not in seen]
             unseen_series = pl.Series("unseen", unseen, dtype=pl.Utf8)
-            flagged = events.select(pl.col("news_id").is_in(unseen_series).alias("cold"), pl.col("label"))
+            flagged = events.select(
+                pl.col("news_id").is_in(unseen_series).alias("cold"), pl.col("label")
+            )
             out[f"{fold}_{label}"] = {
                 "articles": n_articles,
                 "cold_articles": len(unseen),
@@ -85,7 +94,9 @@ def _cold_start_stats(settings: Settings) -> dict[str, Any]:
 
 
 def _user_overlap(settings: Settings) -> dict[str, Any]:
-    users = {fold: set(load_impressions(fold, settings)["user_id"].unique().to_list()) for fold in FOLDS}
+    users = {
+        fold: set(load_impressions(fold, settings)["user_id"].unique().to_list()) for fold in FOLDS
+    }
     test_only = users["test"] - users["train"]
     val_only = users["val"] - users["train"]
     return {
@@ -103,7 +114,9 @@ def _news_stats(settings: Settings) -> dict[str, Any]:
         "articles": int(news.height),
         "categories": int(news.select(pl.col("category").n_unique()).item()),
         "subcategories": int(news.select(pl.col("subcategory").n_unique()).item()),
-        "empty_abstract_share": float(news.select((pl.col("abstract").str.len_chars() == 0).mean()).item()),
+        "empty_abstract_share": float(
+            news.select((pl.col("abstract").str.len_chars() == 0).mean()).item()
+        ),
         "mean_title_chars": float(news.select(pl.col("title").str.len_chars().mean()).item()),
         "mean_abstract_chars": float(news.select(pl.col("abstract").str.len_chars().mean()).item()),
     }

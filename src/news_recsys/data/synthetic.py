@@ -27,11 +27,33 @@ CATEGORIES = {
     "health": ["healthnews", "fitness"],
 }
 
-_WORDS = (
-    "market rally storm season quarterback verdict recipe vaccine senate budget playoff "
-    "hurricane recall lawsuit startup earnings royal wedding rookie trade deadline "
-    "forecast outbreak championship inflation"
-).split()
+_WORDS = [
+    "market",
+    "rally",
+    "storm",
+    "season",
+    "quarterback",
+    "verdict",
+    "recipe",
+    "vaccine",
+    "senate",
+    "budget",
+    "playoff",
+    "hurricane",
+    "recall",
+    "lawsuit",
+    "startup",
+    "earnings",
+    "royal",
+    "wedding",
+    "rookie",
+    "trade",
+    "deadline",
+    "forecast",
+    "outbreak",
+    "championship",
+    "inflation",
+]
 
 
 def _sentence(rng: random.Random, n: int) -> str:
@@ -80,7 +102,8 @@ def _write_behaviors(
             slate = list(dict.fromkeys(slate))  # dedupe, keep order
             clicked_index = rng.randrange(len(slate)) if rng.random() < 0.8 else -1
             entries = [
-                f"{news_id}-{1 if index == clicked_index else 0}" for index, news_id in enumerate(slate)
+                f"{news_id}-{1 if index == clicked_index else 0}"
+                for index, news_id in enumerate(slate)
             ]
             lines.append(
                 "\t".join(
