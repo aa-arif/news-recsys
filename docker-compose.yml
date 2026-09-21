@@ -27,7 +27,9 @@ services:
       - ./data/processed:/app/data/processed:ro
       - ./results:/app/results
     ports:
-      - "8000:8000"
+      # Host port is configurable: something else may already own 8000 on the dev box
+      # (it did on mine, which is how this got noticed).
+      - "${NEWSREC_HOST_PORT:-8000}:8000"
     depends_on:
       redis:
         condition: service_healthy
