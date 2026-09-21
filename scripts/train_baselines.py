@@ -31,6 +31,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default=None, choices=["small", "large", "synthetic"])
     parser.add_argument("--num-boost-round", type=int, default=600)
+    parser.add_argument("--variant", default="", help="feature variant to use")
+    parser.add_argument("--label", default="", help="suffix for the results file")
     parser.add_argument(
         "--train-negative-rate",
         type=float,
@@ -44,7 +46,10 @@ def main() -> None:
     seed_everything(settings.seed)
 
     vocabulary = load_vocabulary(settings)
-    folds = {fold: load_fold_features(fold, settings) for fold in ("train", "val", "test")}
+    folds = {
+        fold: load_fold_features(fold, settings, variant=args.variant)
+        for fold in ("train", "val", "test")
+    }
     # Articles the training fold ever showed: the reference set for the cold-start slice.
     train_news_index = folds["train"].news_index.astype(np.int64)
     logger.info(
@@ -56,6 +61,7 @@ def main() -> None:
 
     results: dict[str, Any] = {
         "dataset": settings.dataset,
+        "variant": args.variant,
         "protocol": (
             "val = last day of MIND train (model selection); test = MIND-small dev, scored once. "
             "Probabilities come from Platt scaling fitted on val."
@@ -85,6 +91,11 @@ def main() -> None:
             settings,
             probabilities=calibrator.transform(scores["test"]),
             train_news_index=train_news_index,
+            save_per_impression=(
+                settings.artifact_dir
+                / "per_impression"
+                / f"popularity_{args.label or 'default'}.npz"
+            ),
         ),
     }
     popularity_curve = results["models"]["popularity"]["test"]["probability"]["calibration"]
@@ -104,7 +115,8 @@ def main() -> None:
     training_rows = training_fold.labels.size
     with timed(logger, "LightGBM LambdaRank") as lgbm_timing:
         model.fit(training_fold, folds["val"], num_boost_round=args.num_boost_round)
-    model.save(settings.artifact_dir)
+    if not args.label:
+        model.save(settings.artifact_dir)
 
     # The training design matrix is the biggest object in the process; drop it before
     # scoring so the largest dataset variant does not need both at once.
@@ -121,7 +133,8 @@ def main() -> None:
     lgbm_calibrator = PlattCalibrator().fit(
         lgbm_scores["val"], folds["val"].labels.astype(np.float64)
     )
-    lgbm_calibrator.save(settings.artifact_dir / "lgbm_calibrator.json")
+    if not args.label:
+        lgbm_calibrator.save(settings.artifact_dir / "lgbm_calibrator.json")
 
     results["models"]["lgbm_lambdarank"] = {
         "model": "lightgbm_lambdarank",
@@ -149,11 +162,15 @@ def main() -> None:
             settings,
             probabilities=lgbm_calibrator.transform(lgbm_scores["test"]),
             train_news_index=train_news_index,
+            save_per_impression=(
+                settings.artifact_dir / "per_impression" / f"lgbm_{args.label or 'default'}.npz"
+            ),
         ),
     }
     lgbm_curve = results["models"]["lgbm_lambdarank"]["test"]["probability"]["calibration"]
 
-    figure_path = settings.figures_dir / f"calibration_baselines_{settings.dataset}.png"
+    label = f"_{args.label}" if args.label else ""
+    figure_path = settings.figures_dir / f"calibration_baselines{label}_{settings.dataset}.png"
     plot_calibration(
         {"time-aware popularity": popularity_curve, "LightGBM LambdaRank": lgbm_curve},
         figure_path,
@@ -161,7 +178,7 @@ def main() -> None:
     )
     results["figures"] = {"calibration": str(figure_path.relative_to(settings.root_dir))}
 
-    path = write_json(settings.metrics_dir / f"baselines_{settings.dataset}.json", results)
+    path = write_json(settings.metrics_dir / f"baselines{label}_{settings.dataset}.json", results)
     for name, payload in results["models"].items():
         means = payload["test"]["overall"]
         logger.info(

@@ -15,6 +15,7 @@ so online features start from exactly the state offline evaluation used.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -82,6 +83,50 @@ class FoldFeatures:
         )
 
 
+#: Dense features that are *not* derived from the counter pipeline: content similarity,
+#: request context, static article attributes and the history length that arrives with the
+#: request. Everything else is a counter and is dropped by the ablation.
+NON_COUNTER_FEATURES = (
+    "user_history_len_log1p",
+    "text_sim_hist_mean",
+    "text_sim_hist_max",
+    "text_sim_hist_last",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "is_weekend",
+    "title_len_log1p",
+    "abstract_len_log1p",
+    "n_title_entities_log1p",
+    "n_abstract_entities_log1p",
+)
+
+
+def drop_counter_features(fold: FoldFeatures) -> FoldFeatures:
+    """Keep only the features a model could compute without any counter pipeline.
+
+    The candidate's text embedding, its category/subcategory embeddings and the attended
+    click history all live outside the dense block, so the ablated model is still a content
+    and behaviour model - it just cannot see popularity, CTR, recency or user counters.
+    """
+    names = list(fold.names)
+    keep = [index for index, name in enumerate(names) if name in NON_COUNTER_FEATURES]
+    missing = set(NON_COUNTER_FEATURES) - set(names)
+    if missing:
+        raise KeyError(f"feature names have drifted; not found: {sorted(missing)}")
+    return FoldFeatures(
+        fold=fold.fold,
+        features=np.ascontiguousarray(fold.features[:, keep]),
+        labels=fold.labels,
+        impression_key=fold.impression_key,
+        news_index=fold.news_index,
+        user_index=fold.user_index,
+        timestamp=fold.timestamp,
+        names=tuple(names[index] for index in keep),
+    )
+
+
 def subsample_negatives(fold: FoldFeatures, rate: float, *, seed: int = 42) -> FoldFeatures:
     """Keep every positive and ``rate`` of the negatives, preserving impression order.
 
@@ -127,10 +172,37 @@ def _mapping_frame(values: list[str], key: str, target: str) -> pl.DataFrame:
     return pl.DataFrame({key: values, target: np.arange(len(values), dtype=np.int64)})
 
 
+SECONDS_PER_DAY = 86_400.0
+
+
+def visible_at(event_time: float, delay_seconds: float, *, daily_batch: bool) -> float:
+    """When a counter pipeline with this policy would make ``event_time`` readable."""
+    if daily_batch:
+        # Nightly rebuild: everything that happened today lands at the next midnight.
+        return (np.floor(event_time / SECONDS_PER_DAY) + 1.0) * SECONDS_PER_DAY
+    return event_time + delay_seconds
+
+
+def features_dir(settings: Settings, variant: str = "") -> Path:
+    """Where a feature variant lives, so regimes can coexist on disk."""
+    suffix = f"_{variant}" if variant else ""
+    return settings.artifact_dir / f"features{suffix}"
+
+
 def build_features(
-    settings: Settings | None = None, *, vocabulary: Vocabulary | None = None
+    settings: Settings | None = None,
+    *,
+    vocabulary: Vocabulary | None = None,
+    delay_seconds: float = 0.0,
+    daily_batch: bool = False,
+    variant: str = "",
 ) -> dict[str, FoldFeatures]:
-    """Run the ordered replay and return one :class:`FoldFeatures` per fold."""
+    """Run the ordered replay and return one :class:`FoldFeatures` per fold.
+
+    With ``delay_seconds`` or ``daily_batch``, an impression's outcomes are withheld from
+    the counters until the policy makes them visible, so features describe what a pipeline
+    with that latency would actually have known.
+    """
     settings = settings or get_settings()
     vocabulary = vocabulary or load_vocabulary(settings)
     embeddings = np.asarray(load_embeddings(settings, mmap=False), dtype=np.float32)
@@ -186,7 +258,7 @@ def build_features(
 
     # Written through a memmap rather than allocated in RAM: on MIND-large these three
     # matrices total ~14 GB, which does not fit next to the event table on a 32 GB box.
-    scratch = settings.artifact_dir / "features"
+    scratch = features_dir(settings, variant)
     scratch.mkdir(parents=True, exist_ok=True)
     outputs: dict[str, NDArray[np.float32]] = {
         fold: np.lib.format.open_memmap(
@@ -199,28 +271,54 @@ def build_features(
     }
     cursors: dict[str, int] = dict.fromkeys(FOLDS, 0)
     snapshot_written = False
+    delayed = delay_seconds > 0.0 or daily_batch
+    # Events waiting for the counter pipeline to catch up, in visibility order. Visibility
+    # is monotone in event time under both policies, so a FIFO is enough.
+    pending: deque[tuple[float, NDArray[np.int64], NDArray[np.int8], int, float]] = deque()
+
+    def drain(until: float) -> None:
+        while pending and pending[0][0] <= until:
+            _, indices, labels, user, event_time = pending.popleft()
+            # Applied late, but stamped with when it happened: counters end up correct and
+            # stale rather than correct and time-shifted.
+            store.update(indices, labels, user, event_time)
 
     with timed(logger, f"replay {len(boundaries) - 1} impressions"):
         for start, end in pairwise(boundaries):
             fold = str(event_fold[start])
-            if fold == "test" and not snapshot_written:
-                # Freeze the state the online system would have at the start of the test
-                # day; the serving path loads exactly this into Redis.
-                save_snapshot(store, settings, as_of=float(event_ts[start]))
-                snapshot_written = True
-
             key = int(event_impression[start])
             user_index, history_index = impression_lookup[key]
             history = np.asarray(history_index if history_index is not None else [], dtype=np.int64)
             article_indices = event_news_index[start:end]
             now = float(event_ts[start])
 
+            if delayed:
+                drain(now)
+
+            if fold == "test" and not snapshot_written:
+                # Freeze the state the online system would have at the start of the test
+                # day; the serving path loads exactly this into Redis.
+                save_snapshot(store, settings, as_of=now, variant=variant)
+                snapshot_written = True
+
             matrix = store.features_for_impression(article_indices, user_index, history, now)
             cursor = cursors[fold]
             outputs[fold][cursor : cursor + matrix.shape[0]] = matrix
             cursors[fold] = cursor + matrix.shape[0]
 
-            store.update(article_indices, event_labels[start:end], user_index, now)
+            labels_now = event_labels[start:end]
+            if delayed:
+                pending.append(
+                    (
+                        visible_at(now, delay_seconds, daily_batch=daily_batch),
+                        article_indices,
+                        labels_now,
+                        user_index,
+                        now,
+                    )
+                )
+            else:
+                store.update(article_indices, labels_now, user_index, now)
 
     if not snapshot_written:  # datasets without a test fold (not expected, but be explicit)
         save_snapshot(store, settings, as_of=float(event_ts[-1]))
@@ -263,11 +361,14 @@ def _group_boundaries(values: NDArray[Any]) -> NDArray[np.int64]:
     return np.concatenate(([0], changes, [values.size])).astype(np.int64)
 
 
-def save_snapshot(store: TimeAwareFeatureStore, settings: Settings, *, as_of: float) -> Path:
+def save_snapshot(
+    store: TimeAwareFeatureStore, settings: Settings, *, as_of: float, variant: str = ""
+) -> Path:
     """Persist the counter state (used to seed Redis for serving)."""
     directory = settings.artifact_dir
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / SNAPSHOT_FILENAME
+    suffix = f".{variant}" if variant else ""
+    path = directory / SNAPSHOT_FILENAME.replace(".npz", f"{suffix}.npz")
     np.savez_compressed(
         path,
         as_of=np.asarray([as_of], dtype=np.float64),
@@ -330,6 +431,8 @@ def load_snapshot(
     return store, float(payload["as_of"][0])
 
 
-def load_fold_features(fold: str, settings: Settings | None = None) -> FoldFeatures:
+def load_fold_features(
+    fold: str, settings: Settings | None = None, *, variant: str = ""
+) -> FoldFeatures:
     settings = settings or get_settings()
-    return FoldFeatures.load(settings.artifact_dir / "features", fold)
+    return FoldFeatures.load(features_dir(settings, variant), fold)

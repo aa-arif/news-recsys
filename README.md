@@ -15,6 +15,15 @@ offline one bit for bit.
 > `results/`; this README is generated from those JSON files by
 > `scripts/build_readme.py`. Anything not yet measured says **TBD**.
 
+**One caveat belongs next to those headline numbers.** They are measured against counters
+that update the instant a click happens. The server in this repo boots from a
+**start-of-day snapshot** and serves a **static trending list**, so what it actually reads
+is up to a day stale. The skew test cannot see that difference - it compares both paths
+against the same store at the same timestamp - so the gap was measured separately, by
+rebuilding the features under several counter-latency regimes. The result is in
+[Feature freshness](#feature-freshness) and it is the single largest caveat on the offline
+numbers.
+
 ## Architecture
 
 ```mermaid
@@ -140,12 +149,18 @@ shift of the logit by `log(keep_rate)`; the table shows it working.
 | most-popular-now, live pool | 0.0649 | 0.1206 | 0.2166 | 0.3740 | 0.4122 |
 
 **The learned tower is not the best retriever here, and the repo ships the measured answer
-rather than the intended one.** A user-independent "most popular in the last 24h" list
-retrieves the clicked article about 12x more often than the two-tower does: news clicks are
-head-heavy and freshness-driven, and a content-only tower has no notion of recency, so it
-returns articles that are *about* the right thing and days old. The serving path therefore
-blends both sources and lets the ranker - which does have recency and CTR features - sort
-the union.
+rather than the intended one.** A user-independent "most popular right now" list beats it
+under every pool tested: news clicks are head-heavy and freshness-driven, and a content-only
+tower has no notion of recency, so it returns articles that are *about* the right thing and
+days old. The serving path therefore blends both sources and lets the ranker - which does
+have recency and CTR features - sort the union.
+
+Two trending numbers appear in this README and they are **not** the same measurement. The
+0.3740 in the table above comes from a *static* list built once from the start-of-day
+snapshot - which is what the server currently serves. The 0.7322 in the fresh-pool section
+below comes from *live* counters re-scored at each impression's own timestamp. The gap
+between them is the value of a streaming counter pipeline, and it is quantified in
+"Feature freshness" below.
 
 Two caveats belong with that number. The tower was still improving when training stopped at
 6 CPU epochs. And recall measured against *logged* clicks rewards a retriever for
@@ -242,14 +257,77 @@ ONNX exports agree with PyTorch to 1.8e-07 (user tower) and 1.7e-06 (ranker).
 Redis holds 20,288 article counter rows, 50,000 user rows and 50,000 click histories (30.3 MB, 119,170 keys).
 
 
+## Feature freshness
+
+The offline numbers above assume counters that update the instant a click happens. The
+server boots from a start-of-day snapshot. To price that difference, the replay was given a
+**feedback delay**: an event updates the counters only once it is at least *d* old, plus a
+daily-batch regime where everything lands at midnight. Features, ranker and LightGBM were
+rebuilt for each regime; selection stayed on validation and each configuration was scored
+on the test fold once (`scripts/run_freshness_suite.py`).
+
+| counter latency | ranker AUC | ranker nDCG@10 | LightGBM AUC | trending Recall@200 |
+|---|---:|---:|---:|---:|
+| live counters (0 s) (3 seeds) | 0.7171 | 0.4642 | 0.7017 | 0.7322 |
+| 5 minutes | 0.7142 | 0.4616 | 0.6981 | 0.7303 |
+| 1 hour | 0.6916 | 0.4437 | 0.6879 | 0.6883 |
+| 6 hours | 0.6724 | 0.4231 | 0.6646 | 0.4005 |
+| daily batch (midnight) (3 seeds) | 0.6578 | 0.4116 | 0.6559 | 0.3837 |
+
+Going from live counters to a nightly batch costs the ranker **0.0593 AUC**,
+which is larger than every modelling improvement in this repo put together. The damage is
+not linear in the delay: five minutes costs almost nothing, and the curve bends somewhere
+between five minutes and an hour. The operational conclusion is that the counter pipeline
+has to be *streaming-ish*, not instantaneous - a minutes-old aggregation buys nearly all of
+the benefit, and a nightly batch throws it away.
+
+Two further things in these numbers are worth saying out loud, because both are
+uncomfortable:
+
+* **Most of the neural ranker's advantage over the tabular baseline is fresh counters, not
+  architecture.** Paired on the same impressions, the ranker beats LightGBM by
+  0.0154 AUC on live
+  counters and by only
+  0.0019 on a nightly
+  batch. Both intervals exclude zero, but the effect shrinks by roughly 8x. If the pipeline
+  were a nightly batch, the DIN + DCN-v2 model would be hard to justify over LightGBM.
+* **Retraining on stale counters is worse than being served them.** The model trained on
+  daily-batch features scores 0.6578
+  AUC, below the 0.6670 of the
+  live-counter model reading the same stale features. Retraining does not recover what the
+  delay destroyed, because the delay removed the signal rather than shifting it - so the fix
+  is the pipeline, not the model.
+
+**What the deployed server would actually get.** Taking the live-counter ranker *without
+retraining it* and feeding it daily-batch features - weights trained on fresh counters,
+reading stale ones, which is precisely this repo's serving configuration - costs
+0.7144 -> 0.6670 AUC
+and 0.4610 -> 0.4163
+nDCG@10 (paired bootstrap over 73,152 impressions: 0.0474 AUC, 95% CI [0.0456, 0.0492]).
+
+Ranker minus LightGBM, paired on the impressions both scored (3 seeds averaged, per-impression AUC):
+
+| counter latency | mean difference | 95% CI | excludes zero |
+|---|---:|---|---|
+| live counters (0 s) | 0.0154 | [0.0141, 0.0167] | yes |
+| daily batch (midnight) | 0.0019 | [0.0003, 0.0036] | yes |
+
+**And the other end of the same question:** a ranker trained with *every* counter feature
+removed - keeping text, category, the attended click history, time of day and static
+article attributes - scores 0.6452 AUC / 0.4057
+nDCG@10. That is the floor the counter pipeline is bought against, and it is the row that
+compares like-for-like with the published content-only models further down.
+
+
+
 ## Load test
 
-Hardware: 12th Gen Intel(R) Core(TM) i5-1235U, 10 physical / 12 logical cores, 31.7 GB RAM, none (CPU-only measurements).
+Hardware: 12th Gen Intel(R) Core(TM) i5-1235U, 10 physical / 12 logical cores, 31.7 GB RAM, no GPU (all timings are CPU-only).
 Offered load is **open loop** - arrivals follow a fixed timetable, so a slow server gets a growing queue instead of a quietly reduced load. 60s per rung, k=10.
 
 Each run records a sequential **calibration anchor** before and after the ladder (13.9 ms -> 14.1 ms here), because this 15 W laptop measurably slows down after hours of sustained work: the same probe read 15.0 ms cold and 42.5 ms after an afternoon of training runs. Absolute QPS on this box is only meaningful with the anchor attached; the configuration *comparison* below is not.
 
-**Sustained 98.3 QPS with p99 under 50 ms** in the baseline configuration, rising to **98.3 QPS** with half the candidate set.
+**Sustained 98.3 QPS with p99 under 50 ms**, and halving the candidate set did not change that: every configuration reached the same rung, because the load generator shares the box with the server (see the caveat below). The configurations separate on per-request latency, not on capacity.
 
 | offered | achieved QPS | p50 (ms) | p95 (ms) | p99 (ms) | server p50 (ms) |
 |---:|---:|---:|---:|---:|---:|
@@ -339,9 +417,12 @@ impression contained.
 * baselines: LightGBM LambdaRank test AUC 0.7090, nDCG@10 0.4600 (negatives subsampled to 0.20 for training only, so the design matrix fits in RAM)
 * ranker: DIN + DCN-v2, 2 epochs in 4139 s, test AUC 0.7244, nDCG@10 0.4711
 
-Same code, same hyperparameters, 11x the data - and both models improve
-(ranker 0.7144 -> 0.7244 AUC), which is the sanity check that the scale-up is real
-rather than a plumbing exercise.
+Same code, same hyperparameters, 11x the data, and the ranker scores
+0.7244 AUC here against 0.7144 on MIND-small. That is **not** a like-for-like
+improvement: MIND-large has its own, larger test split, so the two numbers describe
+different populations of users and impressions. What it does show is that the pipeline
+runs unchanged at 11x and produces a model in the same range - a plumbing result, not a
+modelling one.
 
 **The one stage that did not run:** the two-tower was not trained at this size. At the rate
 measured on MIND-small that is roughly 4.5 hours of CPU, so there is no MIND-large retrieval
@@ -365,6 +446,7 @@ All numbers are percentages on the MIND-small `dev` split.
 | BERT-NRMS | 68.60 | 32.97 | 36.55 | 42.78 | [2409.17711](https://arxiv.org/abs/2409.17711) |
 | Prompt4NR | 68.48 | 33.29 | 37.12 | 43.25 | [2409.17711](https://arxiv.org/abs/2409.17711) |
 | UniTRec | 68.59 | 33.76 | 37.63 | 43.74 | [2409.17711](https://arxiv.org/abs/2409.17711) |
+| **this repo: DIN + DCN-v2, **no counter features** (like-for-like)** | 64.52 | 31.60 | 34.37 | 40.57 | measured here |
 | **this repo: LightGBM LambdaRank** | 70.17 | 35.05 | 39.02 | 45.00 | measured here |
 | **this repo: DIN + DCN-v2** | 71.44 | 35.97 | 39.87 | 46.10 | measured here |
 
@@ -375,11 +457,17 @@ All numbers are percentages on the MIND-small `dev` split.
 * Those models train on all of MIND-small train; this repo holds out its last calendar day for validation and therefore trains on less data.
 * Those models are content-only neural rankers. The models here also use time-aware popularity/CTR counters computed causally from earlier events - a different information set, which is the most likely explanation for any gap in either direction.
 
-The honest summary: the models here are ahead on this split, and the most likely reason is
-the time-aware counter features rather than the architecture - those are legitimate,
-causally computed, and available online, but they are information the cited content-only
-models do not use. A like-for-like architecture comparison would need those features
-removed, which is a one-line ablation this repo has not run.
+**The honest summary is not flattering, and it is the most useful line in this README.**
+Strip the counter features - the only row that compares like-for-like with these
+content-only models - and this architecture scores **64.52 AUC, below every published model
+in the table**. The 71.44 at the bottom is bought almost entirely by time-aware popularity
+and CTR features, which are legitimate (causally computed, available online, and a real
+system would use them) but are information the cited models do not have.
+
+So the correct reading is: this repo demonstrates that counters beat architecture on news
+ranking, not that its architecture beats NRMS or DIGAT. It does not. A table without the
+ablated row would be taking credit for the wrong thing, and the counter-latency section
+above shows how fragile that credit is anyway.
 
 
 ## Reproducing
@@ -394,7 +482,7 @@ make m4                             # DIN + DCN-v2 ranker
 make m5                             # ONNX export, redis, seed the feature store
 make serve                          # run the API (separate shell)
 make skew                           # assert online features == offline features
-make m6                             # locust ladder, latency vs QPS
+make m6                             # latency-vs-QPS ladder (validated open-loop generator)
 make m7                             # MMR diversity trade-off
 make readme                         # regenerate this file from results/
 ```
@@ -419,7 +507,7 @@ code path.
 
 Machine: 12th Gen Intel(R) Core(TM) i5-1235U, 10 physical /
 12 logical cores, 31.7 GB RAM,
-none (CPU-only measurements). Python 3.11.15,
+none. Python 3.11.15,
 torch 2.14.0+cpu,
 onnxruntime 1.30.0,
 faiss 1.15.1.

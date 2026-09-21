@@ -1,0 +1,97 @@
+{
+  "dataset": "small",
+  "catalogue": 65238,
+  "impressions_scored": 73152,
+  "cutoffs": [
+    50,
+    200
+  ],
+  "windows_hours": [
+    24.0,
+    48.0
+  ],
+  "delay_seconds": 300.0,
+  "daily_batch": false,
+  "protocol": "Per-impression candidate pool: articles with at least one impression in the preceding window, judged only from events strictly earlier than the impression. Trending is scored with live decayed CTR at the impression timestamp; blend takes half the budget from each source.",
+  "clicks_scored": 111383,
+  "pools": {
+    "full": {
+      "reachable_clicks": 111383,
+      "reachable_share": 1.0,
+      "retrievers": {
+        "two_tower": {
+          "recall@50": 0.010495317956959321,
+          "recall@200": 0.030004578795686954,
+          "recall@50_given_reachable": 0.010495317956959321,
+          "recall@200_given_reachable": 0.030004578795686954
+        },
+        "trending": {
+          "recall@50": 0.5305657057181078,
+          "recall@200": 0.7302550658538556,
+          "recall@50_given_reachable": 0.5305657057181078,
+          "recall@200_given_reachable": 0.7302550658538556
+        },
+        "blend": {
+          "recall@50": 0.4190226515716043,
+          "recall@200": 0.6598044584900747,
+          "recall@50_given_reachable": 0.4190226515716043,
+          "recall@200_given_reachable": 0.6598044584900747
+        }
+      },
+      "mean_pool_size": 65238.0,
+      "median_pool_size": 65238.0
+    },
+    "fresh_24h": {
+      "reachable_clicks": 111222,
+      "reachable_share": 0.9985545370478439,
+      "retrievers": {
+        "two_tower": {
+          "recall@50": 0.0459944515769911,
+          "recall@200": 0.13312624009049856,
+          "recall@50_given_reachable": 0.04606103109097121,
+          "recall@200_given_reachable": 0.13331894769020516
+        },
+        "trending": {
+          "recall@50": 0.5305657057181078,
+          "recall@200": 0.7302550658538556,
+          "recall@50_given_reachable": 0.5313337289385194,
+          "recall@200_given_reachable": 0.7313121504738271
+        },
+        "blend": {
+          "recall@50": 0.4265013511936292,
+          "recall@200": 0.6847184938455599,
+          "recall@50_given_reachable": 0.42711873550196905,
+          "recall@200_given_reachable": 0.685709661757566
+        }
+      },
+      "mean_pool_size": 5931.9604111986,
+      "median_pool_size": 5990.0
+    },
+    "fresh_48h": {
+      "reachable_clicks": 111227,
+      "reachable_share": 0.9985994272016376,
+      "retrievers": {
+        "two_tower": {
+          "recall@50": 0.027643356706140074,
+          "recall@200": 0.09593025865706616,
+          "recall@50_given_reachable": 0.027682127540974762,
+          "recall@200_given_reachable": 0.0960648044090014
+        },
+        "trending": {
+          "recall@50": 0.5305657057181078,
+          "recall@200": 0.7302550658538556,
+          "recall@50_given_reachable": 0.5313098438328823,
+          "recall@200_given_reachable": 0.7312792757154288
+        },
+        "blend": {
+          "recall@50": 0.42226372067550705,
+          "recall@200": 0.6730560318899652,
+          "recall@50_given_reachable": 0.4228559612324346,
+          "recall@200_given_reachable": 0.6740000179812455
+        }
+      },
+      "mean_pool_size": 9557.917965332459,
+      "median_pool_size": 9627.0
+    }
+  }
+}

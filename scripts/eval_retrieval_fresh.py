@@ -27,6 +27,7 @@ from the pool's coverage).
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from itertools import pairwise
 from typing import Any
 
@@ -36,6 +37,7 @@ from numpy.typing import NDArray
 from news_recsys.config import Settings, get_settings, seed_everything
 from news_recsys.data.sequences import build_impression_histories
 from news_recsys.data.splits import load_all_events, load_news
+from news_recsys.features.build import visible_at
 from news_recsys.features.text import load_embeddings
 from news_recsys.features.time_aware import TimeAwareFeatureStore
 from news_recsys.features.vocab import Vocabulary, load_vocabulary
@@ -144,6 +146,9 @@ def main() -> None:
     parser.add_argument("--dataset", default=None, choices=["small", "large", "synthetic"])
     parser.add_argument("--windows", default="24,48", help="fresh-pool windows in hours")
     parser.add_argument("--max-impressions", type=int, default=0, help="0 scores every impression")
+    parser.add_argument("--delay-seconds", type=float, default=0.0)
+    parser.add_argument("--daily-batch", action="store_true")
+    parser.add_argument("--label", default="", help="suffix for the results file")
     args = parser.parse_args()
 
     settings = get_settings(dataset=args.dataset) if args.dataset else get_settings()
@@ -194,11 +199,23 @@ def main() -> None:
     boundaries = np.concatenate(([0], boundaries, [event_key.size]))
     scored_impressions = 0
 
+    # Same counter-latency policy as the replay, so the trending retriever is measured
+    # under the pipeline the rankers were measured under.
+    delayed = args.delay_seconds > 0.0 or args.daily_batch
+    pending: deque[tuple[float, NDArray[np.int64], NDArray[np.int8], float]] = deque()
+
+    def drain(until: float) -> None:
+        while pending and pending[0][0] <= until:
+            _, indices, labels, event_time = pending.popleft()
+            store.update(indices, labels, -1, event_time)
+
     with timed(logger, f"replay {boundaries.size - 1} impressions"):
         for start, end in pairwise(boundaries):
             now = float(event_ts[start])
             indices = event_news[start:end]
             labels = event_label[start:end]
+            if delayed:
+                drain(now)
 
             is_test = str(event_fold[start]) == "test"
             budget_reached = args.max_impressions and scored_impressions >= args.max_impressions
@@ -232,7 +249,17 @@ def main() -> None:
                                 tally.reachable[pool] += 1
                     tally.clicks += int(clicked.size)
 
-            store.update(indices, labels, -1, now)
+            if delayed:
+                pending.append(
+                    (
+                        visible_at(now, args.delay_seconds, daily_batch=args.daily_batch),
+                        indices,
+                        labels,
+                        now,
+                    )
+                )
+            else:
+                store.update(indices, labels, -1, now)
 
     report = tally.report()
     for pool in pools:
@@ -246,6 +273,8 @@ def main() -> None:
         "impressions_scored": scored_impressions,
         "cutoffs": list(CUTOFFS),
         "windows_hours": windows,
+        "delay_seconds": args.delay_seconds,
+        "daily_batch": args.daily_batch,
         "protocol": (
             "Per-impression candidate pool: articles with at least one impression in the "
             "preceding window, judged only from events strictly earlier than the impression. "
@@ -254,7 +283,10 @@ def main() -> None:
         ),
         **report,
     }
-    path = write_json(settings.metrics_dir / f"retrieval_fresh_{settings.dataset}.json", payload)
+    label = f"_{args.label}" if args.label else ""
+    path = write_json(
+        settings.metrics_dir / f"retrieval_fresh{label}_{settings.dataset}.json", payload
+    )
 
     for pool, block in report["pools"].items():
         logger.info(

@@ -28,6 +28,7 @@ metrics are computed - never on test.
 from __future__ import annotations
 
 from itertools import pairwise
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -111,11 +112,24 @@ def evaluate_predictions(
     probabilities: NDArray[np.float64] | None = None,
     train_news_index: NDArray[np.int64] | None = None,
     with_slices: bool = True,
+    save_per_impression: Path | None = None,
 ) -> dict[str, Any]:
     """Full report for one model on one fold."""
     scores = np.asarray(scores, dtype=np.float64)
     labels = fold.labels.astype(np.float64)
     report = evaluate_ranking(labels, scores, fold.impression_key, cutoffs=settings.ndcg_cutoffs)
+
+    if save_per_impression is not None:
+        # Keeping the per-impression arrays is what lets a later script run a paired
+        # bootstrap against another model on exactly the same impressions.
+        save_per_impression.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            save_per_impression,
+            impression_ids=report.impression_ids,
+            auc=report.auc,
+            mrr=report.mrr,
+            **{f"ndcg_{cutoff}": values for cutoff, values in report.ndcg.items()},
+        )
 
     payload: dict[str, Any] = {
         "fold": fold.fold,

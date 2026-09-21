@@ -275,12 +275,18 @@ def retrieval_section(retrieval: dict[str, Any] | None, settings: Settings) -> s
     return f"""{chr(10).join(rows)}
 
 **The learned tower is not the best retriever here, and the repo ships the measured answer
-rather than the intended one.** A user-independent "most popular in the last 24h" list
-retrieves the clicked article about 12x more often than the two-tower does: news clicks are
-head-heavy and freshness-driven, and a content-only tower has no notion of recency, so it
-returns articles that are *about* the right thing and days old. The serving path therefore
-blends both sources and lets the ranker - which does have recency and CTR features - sort
-the union.
+rather than the intended one.** A user-independent "most popular right now" list beats it
+under every pool tested: news clicks are head-heavy and freshness-driven, and a content-only
+tower has no notion of recency, so it returns articles that are *about* the right thing and
+days old. The serving path therefore blends both sources and lets the ranker - which does
+have recency and CTR features - sort the union.
+
+Two trending numbers appear in this README and they are **not** the same measurement. The
+0.3740 in the table above comes from a *static* list built once from the start-of-day
+snapshot - which is what the server currently serves. The 0.7322 in the fresh-pool section
+below comes from *live* counters re-scored at each impression's own timestamp. The gap
+between them is the value of a streaming counter pipeline, and it is quantified in
+"Feature freshness" below.
 
 Two caveats belong with that number. The tower was still improving when training stopped at
 6 CPU epochs. And recall measured against *logged* clicks rewards a retriever for
@@ -371,6 +377,29 @@ def serving_section(
     return f"{skew_text}\n\n{onnx_text}\n\n{seed_text}\n"
 
 
+def describe_gpu(hardware: dict[str, Any]) -> str:
+    """Render the GPU field as prose; the value is literally "none" on this machine."""
+    gpu = str(hardware.get("gpu", "")).strip()
+    if not gpu or gpu.lower().startswith("none"):
+        return "no GPU (all timings are CPU-only)"
+    return gpu
+
+
+def sustained_sentence(baseline: str, halved: str, slo: float) -> str:
+    """State the capacity result without claiming a rise that did not happen."""
+    if baseline == halved:
+        return (
+            f"**Sustained {baseline} QPS with p99 under {slo:g} ms**, and halving the candidate"
+            " set did not change that: every configuration reached the same rung, because the"
+            " load generator shares the box with the server (see the caveat below). The"
+            " configurations separate on per-request latency, not on capacity."
+        )
+    return (
+        f"**Sustained {baseline} QPS with p99 under {slo:g} ms** in the baseline"
+        f" configuration, and {halved} QPS with half the candidate set."
+    )
+
+
 def sustained_qps(ladder: list[dict[str, Any]], slo_ms: float) -> float:
     """Highest offered rate the service holds *and every rate below it* holds.
 
@@ -400,7 +429,7 @@ def load_section(
     hardware_text = (
         f"{hardware.get('cpu', 'unknown CPU')}, {hardware.get('physical_cores', '?')} physical / "
         f"{hardware.get('logical_cores', '?')} logical cores, "
-        f"{hardware.get('memory_gb', '?')} GB RAM, {hardware.get('gpu', 'no GPU')}"
+        f"{hardware.get('memory_gb', '?')} GB RAM, {describe_gpu(hardware)}"
     )
 
     rows = [
@@ -502,8 +531,7 @@ def load_section(
         " cold and 42.5 ms after an afternoon of training runs. Absolute QPS on this box is only"
         " meaningful with the anchor attached; the configuration *comparison* below is not.",
         "",
-        f"**Sustained {baseline_sustained} QPS with p99 under {slo:g} ms** in the baseline"
-        f" configuration, rising to **{halved_sustained} QPS** with half the candidate set.",
+        sustained_sentence(baseline_sustained, halved_sustained, slo),
         "",
         "\n".join(rows),
         "\n".join(stage_rows),
@@ -562,6 +590,7 @@ def published_section(
     published: dict[str, Any] | None,
     baselines: dict[str, Any] | None,
     ranker: dict[str, Any] | None,
+    freshness: dict[str, Any] | None,
 ) -> str:
     if published is None:
         return f"Published comparisons: {TBD}\n"
@@ -579,6 +608,10 @@ def published_section(
         )
 
     ours = [
+        (
+            "this repo: DIN + DCN-v2, **no counter features** (like-for-like)",
+            dig(freshness, "counter_ablation"),
+        ),
         (
             "this repo: LightGBM LambdaRank",
             dig(baselines, "models", "lgbm_lambdarank", "test", "overall"),
@@ -603,11 +636,17 @@ def published_section(
 
 {caveats}
 
-The honest summary: the models here are ahead on this split, and the most likely reason is
-the time-aware counter features rather than the architecture - those are legitimate,
-causally computed, and available online, but they are information the cited content-only
-models do not use. A like-for-like architecture comparison would need those features
-removed, which is a one-line ablation this repo has not run.
+**The honest summary is not flattering, and it is the most useful line in this README.**
+Strip the counter features - the only row that compares like-for-like with these
+content-only models - and this architecture scores **64.52 AUC, below every published model
+in the table**. The 71.44 at the bottom is bought almost entirely by time-aware popularity
+and CTR features, which are legitimate (causally computed, available online, and a real
+system would use them) but are information the cited models do not have.
+
+So the correct reading is: this repo demonstrates that counters beat architecture on news
+ranking, not that its architecture beats NRMS or DIGAT. It does not. A table without the
+ablated row would be taking credit for the wrong thing, and the counter-latency section
+above shows how fragile that credit is anyway.
 """
 
 
@@ -701,6 +740,126 @@ not a tweak justified by this experiment.
 """
 
 
+def freshness_section(freshness: dict[str, Any] | None) -> str:
+    """What counter latency costs, and what the deployed server actually reads."""
+    if freshness is None:
+        return "Feature freshness: " + TBD + "\n"
+
+    order = ["d0", "d300", "d3600", "d21600", "daily"]
+    rows = [
+        "| counter latency | ranker AUC | ranker nDCG@10 | LightGBM AUC | trending Recall@200 |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for key in order:
+        entry = freshness["regimes"].get(key)
+        if entry is None:
+            continue
+        ranker = entry.get("ranker_mean") or entry.get("ranker_seeds", {}).get("42", {})
+        lgbm = entry.get("lgbm", {})
+        trending = entry.get("trending_retriever") or {}
+        seeds = entry.get("ranker_seeds") or {}
+        suffix = f" ({len(seeds)} seeds)" if len(seeds) > 1 else ""
+        rows.append(
+            f"| {entry['label']}{suffix} | {number(ranker.get('auc'))} | "
+            f"{number(ranker.get('ndcg@10'))} | {number(lgbm.get('auc'))} | "
+            f"{number(trending.get('recall@200'))} |"
+        )
+
+    live = dig(freshness, "regimes", "d0", "ranker_mean", default={})
+    daily = dig(freshness, "regimes", "daily", "ranker_mean", default={})
+    auc_cost = (live.get("auc") or 0.0) - (daily.get("auc") or 0.0)
+
+    deployed = freshness.get("deployed_gap")
+    deployed_text = ""
+    if deployed:
+        paired = deployed.get("paired_bootstrap_auc_drop", {})
+        interval = (
+            f" (paired bootstrap over {paired['impressions']:,} impressions: "
+            f"{number(paired['mean_difference'])} AUC, 95% CI "
+            f"[{number(paired['ci95_low'])}, {number(paired['ci95_high'])}])"
+            if paired
+            else ""
+        )
+        deployed_text = f"""
+**What the deployed server would actually get.** Taking the live-counter ranker *without
+retraining it* and feeding it daily-batch features - weights trained on fresh counters,
+reading stale ones, which is precisely this repo's serving configuration - costs
+{number(deployed["auc_on_own_features"])} -> {number(deployed["auc_on_served_features"])} AUC
+and {number(deployed["ndcg@10_on_own_features"])} -> {number(deployed["ndcg@10_on_served_features"])}
+nDCG@10{interval}.
+"""
+
+    comparisons = freshness.get("paired_comparisons", {})
+    paired_rows: list[str] = []
+    if comparisons:
+        paired_rows = [
+            "",
+            "Ranker minus LightGBM, paired on the impressions both scored (3 seeds averaged, "
+            "per-impression AUC):",
+            "",
+            "| counter latency | mean difference | 95% CI | excludes zero |",
+            "|---|---:|---|---|",
+        ]
+        for key in order:
+            block = comparisons.get(key)
+            if not block:
+                continue
+            difference = block["ranker_minus_lgbm"]
+            label = dig(freshness, "regimes", key, "label", default=key)
+            paired_rows.append(
+                f"| {label} | {number(difference['mean_difference'])} | "
+                f"[{number(difference['ci95_low'])}, {number(difference['ci95_high'])}] | "
+                f"{'yes' if difference['excludes_zero'] else 'no'} |"
+            )
+
+    ablation = freshness.get("counter_ablation")
+    ablation_text = ""
+    if ablation:
+        ablation_text = f"""
+**And the other end of the same question:** a ranker trained with *every* counter feature
+removed - keeping text, category, the attended click history, time of day and static
+article attributes - scores {number(ablation.get("auc"))} AUC / {number(ablation.get("ndcg@10"))}
+nDCG@10. That is the floor the counter pipeline is bought against, and it is the row that
+compares like-for-like with the published content-only models further down.
+"""
+
+    return f"""The offline numbers above assume counters that update the instant a click happens. The
+server boots from a start-of-day snapshot. To price that difference, the replay was given a
+**feedback delay**: an event updates the counters only once it is at least *d* old, plus a
+daily-batch regime where everything lands at midnight. Features, ranker and LightGBM were
+rebuilt for each regime; selection stayed on validation and each configuration was scored
+on the test fold once (`scripts/run_freshness_suite.py`).
+
+{chr(10).join(rows)}
+
+Going from live counters to a nightly batch costs the ranker **{number(auc_cost)} AUC**,
+which is larger than every modelling improvement in this repo put together. The damage is
+not linear in the delay: five minutes costs almost nothing, and the curve bends somewhere
+between five minutes and an hour. The operational conclusion is that the counter pipeline
+has to be *streaming-ish*, not instantaneous - a minutes-old aggregation buys nearly all of
+the benefit, and a nightly batch throws it away.
+
+Two further things in these numbers are worth saying out loud, because both are
+uncomfortable:
+
+* **Most of the neural ranker's advantage over the tabular baseline is fresh counters, not
+  architecture.** Paired on the same impressions, the ranker beats LightGBM by
+  {number(dig(comparisons, "d0", "ranker_minus_lgbm", "mean_difference"))} AUC on live
+  counters and by only
+  {number(dig(comparisons, "daily", "ranker_minus_lgbm", "mean_difference"))} on a nightly
+  batch. Both intervals exclude zero, but the effect shrinks by roughly 8x. If the pipeline
+  were a nightly batch, the DIN + DCN-v2 model would be hard to justify over LightGBM.
+* **Retraining on stale counters is worse than being served them.** The model trained on
+  daily-batch features scores {number(dig(freshness, "regimes", "daily", "ranker_mean", "auc"))}
+  AUC, below the {number(dig(freshness, "deployed_gap", "auc_on_served_features"))} of the
+  live-counter model reading the same stale features. Retraining does not recover what the
+  delay destroyed, because the delay removed the signal rather than shifting it - so the fix
+  is the pipeline, not the model.
+{deployed_text}{chr(10).join(paired_rows)}
+{ablation_text}
+"""
+
+
 def large_section(settings: Settings) -> str:
     """What the MIND-large run covered, and what it deliberately did not."""
     large = Settings(**{**settings.model_dump(exclude={"dataset"}), "dataset": "large"})
@@ -774,9 +933,12 @@ impression contained.
 
 {ran_text}
 
-Same code, same hyperparameters, 11x the data - and both models improve
-(ranker 0.7144 -> {ranker_delta} AUC), which is the sanity check that the scale-up is real
-rather than a plumbing exercise.
+Same code, same hyperparameters, 11x the data, and the ranker scores
+{ranker_delta} AUC here against 0.7144 on MIND-small. That is **not** a like-for-like
+improvement: MIND-large has its own, larger test split, so the two numbers describe
+different populations of users and impressions. What it does show is that the pipeline
+runs unchanged at 11x and produces a model in the same range - a plumbing result, not a
+modelling one.
 
 **The one stage that did not run:** the two-tower was not trained at this size. At the rate
 measured on MIND-small that is roughly 4.5 hours of CPU, so there is no MIND-large retrieval
@@ -797,6 +959,7 @@ def build(settings: Settings) -> str:
     two_tower = load(settings, f"two_tower_{settings.dataset}.json")
     fresh = load(settings, f"retrieval_fresh_{settings.dataset}.json")
     overfit = load(settings, f"two_tower_overfit_{settings.dataset}.json")
+    freshness = load(settings, f"freshness_{settings.dataset}.json")
     onnx = load(settings, f"onnx_{settings.dataset}.json")
     skew = load(settings, f"skew_{settings.dataset}.json")
     seed = load(settings, f"redis_seed_{settings.dataset}.json")
@@ -830,6 +993,15 @@ offline one bit for bit.
 > Every number in this file is produced by a script in this repo and stored under
 > `results/`; this README is generated from those JSON files by
 > `scripts/build_readme.py`. Anything not yet measured says **TBD**.
+
+**One caveat belongs next to those headline numbers.** They are measured against counters
+that update the instant a click happens. The server in this repo boots from a
+**start-of-day snapshot** and serves a **static trending list**, so what it actually reads
+is up to a day stale. The skew test cannot see that difference - it compares both paths
+against the same store at the same timestamp - so the gap was measured separately, by
+rebuilding the features under several counter-latency regimes. The result is in
+[Feature freshness](#feature-freshness) and it is the single largest caveat on the offline
+numbers.
 
 ## Architecture
 
@@ -867,6 +1039,10 @@ implementation of every feature.
 
 {serving_section(skew, onnx, seed)}
 
+## Feature freshness
+
+{freshness_section(freshness)}
+
 ## Load test
 
 {load_section(load_configs, generator, settings)}
@@ -881,7 +1057,7 @@ implementation of every feature.
 
 ## Published comparisons
 
-{published_section(published, baselines, ranker)}
+{published_section(published, baselines, ranker, freshness)}
 
 ## Reproducing
 
@@ -895,7 +1071,7 @@ make m4                             # DIN + DCN-v2 ranker
 make m5                             # ONNX export, redis, seed the feature store
 make serve                          # run the API (separate shell)
 make skew                           # assert online features == offline features
-make m6                             # locust ladder, latency vs QPS
+make m6                             # latency-vs-QPS ladder (validated open-loop generator)
 make m7                             # MMR diversity trade-off
 make readme                         # regenerate this file from results/
 ```

@@ -91,7 +91,8 @@ def collect() -> dict[str, Any]:
         "memory_gb": memory_gb(),
         "platform": platform.platform(),
         "torch_threads_default": torch.get_num_threads(),
-        "gpu": "none (CPU-only measurements)",
+        "gpu": "none",
+        "gpu_note": "all timings are CPU-only",
         "libraries": library_versions(),
     }
 

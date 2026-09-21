@@ -138,6 +138,11 @@ m7: rerank ## milestone 7: MMR diversity trade-off
 rerank: ## nDCG vs intra-list diversity as the MMR lambda varies
 	$(PY) scripts/eval_rerank.py --dataset $(DATASET)
 
+# --- freshness / ablation --------------------------------------------------
+.PHONY: freshness
+freshness: ## price counter latency: rebuild features, retrain, and ablate the counters
+	$(PY) scripts/run_freshness_suite.py --dataset $(DATASET)
+
 # --- reporting --------------------------------------------------------------
 .PHONY: readme
 readme: ## regenerate the README tables from results/metrics/*.json

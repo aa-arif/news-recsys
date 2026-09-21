@@ -5,7 +5,8 @@
   "memory_gb": 31.7,
   "platform": "Windows-10-10.0.26200-SP0",
   "torch_threads_default": 10,
-  "gpu": "none (CPU-only measurements)",
+  "gpu": "none",
+  "gpu_note": "all timings are CPU-only",
   "libraries": {
     "python": "3.11.15",
     "numpy": "2.1.3",
