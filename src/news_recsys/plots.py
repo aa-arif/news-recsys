@@ -105,7 +105,7 @@ def plot_latency_vs_qps(
     for index, (name, points) in enumerate(series.items()):
         axis.plot(
             [point["qps"] for point in points],
-            [point["p99_ms"] for point in points],
+            [point.get("client_p99_ms", point.get("p99_ms", float("nan"))) for point in points],
             marker="o",
             linewidth=1.8,
             color=PALETTE[index % len(PALETTE)],

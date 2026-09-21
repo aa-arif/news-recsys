@@ -22,7 +22,7 @@ from news_recsys.features.build import load_snapshot
 from news_recsys.features.vocab import load_vocabulary
 from news_recsys.io_utils import write_json
 from news_recsys.logging_utils import get_logger, timed
-from news_recsys.serving.seed import seed_counters, seed_histories
+from news_recsys.serving.seed import seed_counters, seed_histories, seed_popularity
 
 logger = get_logger("scripts.seed_redis")
 
@@ -53,6 +53,9 @@ def main() -> None:
     with timed(logger, "seed counters") as counter_timing:
         counts.update(seed_counters(client, store, vocabulary, settings))
     counts["counter_seconds"] = counter_timing["seconds"]
+
+    with timed(logger, "seed trending list"):
+        counts["popular_articles"] = seed_popularity(client, store, settings, as_of)
 
     with timed(logger, f"seed {args.history_fold} histories") as history_timing:
         counts["histories"] = seed_histories(client, settings, fold=args.history_fold)

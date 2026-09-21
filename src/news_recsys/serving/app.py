@@ -15,6 +15,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+import anyio.to_thread
 import numpy as np
 import redis
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -50,6 +51,7 @@ class RecommendResponse(BaseModel):
     timings_ms: dict[str, float]
     total_ms: float
     cache_hit: bool
+    sources: dict[str, Any] = Field(default_factory=dict)
 
 
 def build_pipeline(settings: Settings) -> RecommendationPipeline:
@@ -67,6 +69,9 @@ def build_pipeline(settings: Settings) -> RecommendationPipeline:
 async def lifespan(_app: FastAPI):
     settings = get_settings()
     _state["settings"] = settings
+    # Sync endpoints run in anyio's thread pool; its 40-thread default oversubscribes a
+    # 12-thread box badly once every request wants the GIL and 1-2 ORT threads.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = settings.serve_threadpool_size
     _state["pipeline"] = build_pipeline(settings)
     logger.info("serving %s", _state["pipeline"].artifacts.describe())
     yield
@@ -113,9 +118,26 @@ def recommend(
     as_of: float | None = Query(default=None, description="simulated clock, POSIX seconds"),
     ef_search: int | None = Query(default=None, ge=1, le=2048),
     candidates: int | None = Query(default=None, ge=1, le=2000),
+    mmr_lambda: float = Query(
+        default=1.0, ge=0.0, le=1.0, description="1.0 = pure relevance; lower diversifies"
+    ),
+    popularity_share: float | None = Query(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="fraction of the candidate budget taken from the trending list",
+    ),
     pipeline: RecommendationPipeline = Depends(get_pipeline),
 ) -> RecommendResponse:
-    result = pipeline.recommend(user_id, k, now=as_of, ef_search=ef_search, n_candidates=candidates)
+    result = pipeline.recommend(
+        user_id,
+        k,
+        now=as_of,
+        ef_search=ef_search,
+        n_candidates=candidates,
+        mmr_lambda=mmr_lambda,
+        popularity_share=popularity_share,
+    )
     return RecommendResponse(
         user_id=result.user_id,
         k=result.k,
@@ -126,6 +148,7 @@ def recommend(
         timings_ms={name: round(value, 3) for name, value in result.timings_ms.items()},
         total_ms=round(result.total_ms, 3),
         cache_hit=result.cache_hit,
+        sources=result.diagnostics,
     )
 
 

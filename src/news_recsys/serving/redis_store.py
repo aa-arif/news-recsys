@@ -37,6 +37,7 @@ CATEGORY_PREFIX = "cat:"
 SUBCATEGORY_PREFIX = "sub:"
 USER_PREFIX = "usr:"
 HISTORY_PREFIX = "hist:"
+POPULAR_KEY = "pop:top"
 
 
 def article_format(n_half_lives: int) -> str:
@@ -83,6 +84,7 @@ class RedisFeatureStore:
         self.article_struct = struct.Struct(article_format(self.n_half_lives))
         self.user_struct = struct.Struct(user_format(vocabulary.n_categories))
         self.pair_struct = struct.Struct(PAIR_FORMAT)
+        self._empty_article = bytes(self.article_struct.size)
 
     # -- writes (seeding) ---------------------------------------------------
     def pack_article(self, values: NDArray[np.float64]) -> bytes:
@@ -104,6 +106,17 @@ class RedisFeatureStore:
         raw = self.client.lrange(f"{HISTORY_PREFIX}{user_id}", 0, -1) or []
         ids = [item.decode() if isinstance(item, bytes) else str(item) for item in raw]
         return self.vocabulary.news_indices(ids)
+
+    def fetch_popular(self, limit: int) -> NDArray[np.int64]:
+        """The trending article list: a second candidate source alongside the ANN.
+
+        Static here because the serving clock is pinned to the feature-store snapshot; in
+        production this key would be rewritten every minute by the counter pipeline.
+        """
+        if limit <= 0:
+            return np.empty(0, dtype=np.int64)
+        raw = self.client.lrange(POPULAR_KEY, 0, limit - 1) or []
+        return np.asarray([int(item) for item in raw], dtype=np.int64)
 
     def fetch_counters(
         self,
@@ -167,10 +180,12 @@ class RedisFeatureStore:
     ) -> CandidateBlock:
         n = candidate_indices.shape[0]
         width = self.article_struct.size // 8
-        counters = np.zeros((n, width), dtype=np.float64)
-        for row, payload in enumerate(article_raw):
-            if payload:
-                counters[row] = self.article_struct.unpack(payload)
+        # One buffer parse instead of 200 struct.unpack calls: the values are already
+        # little-endian float64 on the wire, so frombuffer reads them directly. Same bytes,
+        # same floats - the skew test still asserts bitwise equality with the offline path.
+        empty = self._empty_article
+        joined = b"".join(payload if payload else empty for payload in article_raw)
+        counters = np.frombuffer(joined, dtype="<f8").reshape(n, width).copy()
 
         h = self.n_half_lives
         impressions = counters[:, 0]

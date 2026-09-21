@@ -1,8 +1,12 @@
 """Everything the server loads once at startup.
 
-Loading is explicit and eager: if an artifact is missing, the process fails at boot
-rather than on the first request. The embedding matrix is memory-mapped, so N workers on
-one box share one copy of the 100 MB of article vectors instead of each paying for it.
+Loading is explicit and eager: if an artifact is missing, the process fails at boot rather
+than on the first request.
+
+The embedding matrix is loaded resident rather than memory-mapped. Sharing one mapped copy
+across workers sounds free, but each request touches a scattered ~250 rows, so under load
+mmap becomes a page-fault storm that shows up as latency; 100 MB per worker is the cheaper
+trade on this box. M6 reports the before/after.
 """
 
 from __future__ import annotations
@@ -52,7 +56,10 @@ class ServingArtifacts:
         settings = settings or get_settings()
         directory = settings.artifact_dir
         vocabulary = load_vocabulary(settings)
-        embeddings = load_embeddings(settings, mmap=True)
+        # Resident, not memory-mapped: the matrix is ~100 MB and every request touches
+        # a different scattered set of rows, so mmap turns into a page-fault storm under
+        # load. Paying the RAM once is measurably cheaper (M6 reports before/after).
+        embeddings = np.ascontiguousarray(load_embeddings(settings, mmap=False))
         news = load_news(settings)
 
         static = ArticleStatic(
@@ -109,6 +116,8 @@ class ServingArtifacts:
             "ort_intra_op_threads": self.settings.ort_intra_op_threads,
             "ort_inter_op_threads": self.settings.ort_inter_op_threads,
             "user_embedding_cache_size": self.settings.user_embedding_cache_size,
+            "popularity_share": self.settings.popularity_share,
+            "serve_threadpool_size": self.settings.serve_threadpool_size,
         }
 
 

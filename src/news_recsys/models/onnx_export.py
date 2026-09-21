@@ -209,7 +209,7 @@ def export_ranker(
         with torch.no_grad():
             expected = wrapper(*[torch.from_numpy(feed[name]) for name in names]).numpy()
 
-    actual = session.run(None, feed)[0]
+    actual = np.asarray(session.run(None, feed)[0], dtype=np.float32)
     difference = float(np.abs(expected - actual).max())
     same_order = bool(np.array_equal(np.argsort(-expected), np.argsort(-actual)))
     logger.info(

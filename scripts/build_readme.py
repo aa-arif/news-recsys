@@ -256,8 +256,38 @@ def retrieval_section(retrieval: dict[str, Any] | None, settings: Settings) -> s
             f"{number(point.get('p95_ms'), 3)} | {number(point.get('p99_ms'), 3)} |"
         )
 
+    blend = dig(test, "blend", default={})
+    blend_rows: list[str] = []
+    if blend:
+        blend_rows = [
+            "",
+            f"Blending both sources at a fixed budget of {blend.get('total_candidates')} candidates "
+            "(the ranker's cost is the budget, so the question is the mix, not the winner):",
+            "",
+            "| candidates from the trending list | Recall of the clicked article |",
+            "|---:|---:|",
+        ]
+        for share, value in blend.get("by_popularity_share", {}).items():
+            label = "all" if int(share) >= int(blend.get("total_candidates", 0)) else share
+            blend_rows.append(f"| {label} | {number(value)} |")
+
     reachable = live.get("reachable_click_share")
     return f"""{chr(10).join(rows)}
+
+**The learned tower is not the best retriever here, and the repo ships the measured answer
+rather than the intended one.** A user-independent "most popular in the last 24h" list
+retrieves the clicked article about 12x more often than the two-tower does: news clicks are
+head-heavy and freshness-driven, and a content-only tower has no notion of recency, so it
+returns articles that are *about* the right thing and days old. The serving path therefore
+blends both sources and lets the ranker - which does have recency and CTR features - sort
+the union.
+
+Two caveats belong with that number. The tower was still improving when training stopped at
+6 CPU epochs. And recall measured against *logged* clicks rewards a retriever for
+re-finding what the previous production system already showed, so it structurally
+under-credits personalised retrieval; the mix below is treated as a product decision, not
+as something to maximise offline.
+{chr(10).join(blend_rows)}
 
 **Index freshness is the binding constraint, not the model.** Only
 {number(reachable, percent=True)} of test clicks are on articles that an index built at the
@@ -341,13 +371,32 @@ def serving_section(
     return f"{skew_text}\n\n{onnx_text}\n\n{seed_text}\n"
 
 
+def sustained_qps(ladder: list[dict[str, Any]], slo_ms: float) -> float:
+    """Highest offered rate the service holds *and every rate below it* holds.
+
+    Taking the best passing rung regardless of what happened below it would let one lucky
+    rung stand in for capacity; a service that fails at 75 QPS has not "sustained" 100.
+    """
+    best = 0.0
+    for point in sorted(ladder, key=lambda item: item["target_qps"]):
+        if point.get("failures", 0) == 0 and point.get("client_p99_ms", 1e9) <= slo_ms:
+            best = max(best, point["achieved_qps"])
+        else:
+            break
+    return best
+
+
 def load_section(
-    baseline: dict[str, Any] | None, tuned: dict[str, Any] | None, settings: Settings
+    configs: dict[str, dict[str, Any] | None],
+    generator: dict[str, Any] | None,
+    settings: Settings,
 ) -> str:
+    baseline = configs.get("baseline")
     if baseline is None:
-        return f"Load test: {TBD}\n"
+        return "Load test: " + TBD + "\n"
 
     hardware = baseline.get("hardware", {})
+    slo = float(baseline.get("slo_ms", 50.0))
     hardware_text = (
         f"{hardware.get('cpu', 'unknown CPU')}, {hardware.get('physical_cores', '?')} physical / "
         f"{hardware.get('logical_cores', '?')} logical cores, "
@@ -355,71 +404,140 @@ def load_section(
     )
 
     rows = [
-        "| target QPS | achieved QPS | p50 (ms) | p95 (ms) | p99 (ms) | failures |",
+        "| offered | achieved QPS | p50 (ms) | p95 (ms) | p99 (ms) | server p50 (ms) |",
         "|---:|---:|---:|---:|---:|---:|",
     ]
     for point in baseline.get("ladder", []):
         rows.append(
             f"| {point['target_qps']} | {number(point.get('achieved_qps'), 1)} | "
             f"{number(point.get('client_p50_ms'), 1)} | {number(point.get('client_p95_ms'), 1)} | "
-            f"{number(point.get('client_p99_ms'), 1)} | {point.get('failures', 0)} |"
+            f"{number(point.get('client_p99_ms'), 1)} | "
+            f"{number(dig(point, 'server', 'server_total', 'p50_ms'), 1)} |"
         )
 
-    best = baseline.get("max_qps_within_slo")
-    slo = baseline.get("slo_ms", 50)
-    headline = (
-        f"**{number(best, 1)} QPS** sustained with p99 under {slo:g} ms"
-        if best
-        else f"p99 stayed above {slo:g} ms at every rung tested"
-    )
+    anchor_before = dig(baseline, "anchor_before", "client_p50_ms")
+    anchor_after = dig(baseline, "anchor_after", "client_p50_ms")
 
-    stage_rows: list[str] = []
-    heaviest = max(
-        baseline.get("ladder", []), key=lambda point: point.get("achieved_qps", 0), default=None
+    stage_point = next(
+        (point for point in baseline.get("ladder", []) if point.get("target_qps") == 50), None
     )
-    stages = dig(heaviest, "server", "stages", default={}) if heaviest else {}
+    stage_rows: list[str] = []
+    stages = dig(stage_point, "server", "stages", default={}) if stage_point else {}
     if stages:
         stage_rows = [
             "",
-            f"Per-stage latency measured inside the server at {number(dig(heaviest, 'achieved_qps'), 0)} QPS:",
+            "Where the time goes, measured inside the server at "
+            f"{number(dig(stage_point, 'achieved_qps'), 0)} QPS:",
             "",
             "| stage | p50 (ms) | p95 (ms) | p99 (ms) |",
             "|---|---:|---:|---:|",
         ]
         for name, values in stages.items():
             stage_rows.append(
-                f"| {name} | {number(values.get('p50_ms'), 2)} | {number(values.get('p95_ms'), 2)} | "
-                f"{number(values.get('p99_ms'), 2)} |"
+                f"| {name} | {number(values.get('p50_ms'), 2)} | "
+                f"{number(values.get('p95_ms'), 2)} | {number(values.get('p99_ms'), 2)} |"
             )
 
-    tuned_text = ""
-    if tuned is not None:
-        tuned_best = tuned.get("max_qps_within_slo")
-        tuned_rows = [
-            "",
-            "### Before and after tuning",
-            "",
-            "| configuration | max QPS under the p99 SLO | p99 at the highest common rung |",
-            "|---|---:|---:|",
+    tuning_rows = [
+        f"| configuration | sustained QPS at p99 <= {slo:g} ms | p50 at 50 QPS (ms) "
+        "| ranking stage p50 (ms) | user-embedding stage p50 (ms) |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    labels = {
+        "baseline": "baseline (200 candidates, no cache, 2 ORT threads)",
+        "cache_only": "+ user-embedding cache",
+        "candidates100_only": "+ 100 candidates instead of 200",
+        "tuned": "all three (cache, 100 candidates, 1 ORT thread)",
+    }
+    for key, label in labels.items():
+        payload = configs.get(key)
+        if payload is None:
+            tuning_rows.append(f"| {label} | {TBD} | {TBD} | {TBD} | {TBD} |")
+            continue
+        ladder = payload.get("ladder", [])
+        at_fifty = next((point for point in ladder if point.get("target_qps") == 50), None)
+        tuning_rows.append(
+            f"| {label} | {number(sustained_qps(ladder, slo), 1)} | "
+            f"{number(dig(at_fifty, 'client_p50_ms'), 1)} | "
+            f"{number(dig(at_fifty, 'server', 'stages', 'ranking', 'p50_ms'), 2)} | "
+            f"{number(dig(at_fifty, 'server', 'stages', 'user_embedding', 'p50_ms'), 2)} |"
+        )
+
+    generator_text = ""
+    if generator:
+        generator_rows = [
+            "| offered | internal generator p50 | server's own p50 | Locust p50 |",
+            "|---:|---:|---:|---:|",
         ]
-        common = min(len(baseline.get("ladder", [])), len(tuned.get("ladder", []))) - 1
-        base_p99 = dig(baseline, "ladder", common, "client_p99_ms") if common >= 0 else None
-        tuned_p99 = dig(tuned, "ladder", common, "client_p99_ms") if common >= 0 else None
-        tuned_rows.append(f"| baseline | {number(best, 1)} | {number(base_p99, 1)} |")
-        tuned_rows.append(f"| tuned | {number(tuned_best, 1)} | {number(tuned_p99, 1)} |")
-        tuned_text = chr(10).join(tuned_rows)
+        for row in generator["comparison"]:
+            generator_rows.append(
+                f"| {row['target_qps']} | {number(row['internal']['client_p50_ms'], 1)} ms | "
+                f"{number(row['internal']['server_p50_ms'], 1)} ms | "
+                f"{number(row['locust']['client_p50_ms'], 1)} ms |"
+            )
+        generator_text = (
+            "\n### The load generator was validated before its numbers were used\n\n"
+            + "\n".join(generator_rows)
+            + "\n\nLocust's gevent loop on this Windows box adds latency the service does not have:"
+            " it reports 5-11x the latency that both an independent open-loop generator *and the"
+            " server's own instrumentation* measure at the same offered rate. The reported numbers"
+            " therefore come from `src/news_recsys/serving/loadgen.py`; Locust stays wired up"
+            " (`--generator locust`) because it is the right tool on a Linux load box. A"
+            " measurement you have not validated is a guess.\n"
+        )
 
-    return f"""Hardware: {hardware_text}.
-Load generated with Locust, {baseline.get("duration_per_rung")} per rung, k={baseline.get("k")}.
+    baseline_sustained = number(sustained_qps(baseline.get("ladder", []), slo), 1)
+    halved = dig(configs, "candidates100_only", "ladder", default=[]) or []
+    halved_sustained = number(sustained_qps(halved, slo), 1)
 
-{headline}.
-
-{chr(10).join(rows)}
-{chr(10).join(stage_rows)}
-{tuned_text}
-
-![latency vs QPS](results/figures/latency_qps_baseline_{settings.dataset}.png)
-"""
+    parts = [
+        f"Hardware: {hardware_text}.",
+        "Offered load is **open loop** - arrivals follow a fixed timetable, so a slow server gets"
+        " a growing queue instead of a quietly reduced load."
+        f" {baseline.get('duration_per_rung')} per rung, k={baseline.get('k')}.",
+        "",
+        "Each run records a sequential **calibration anchor** before and after the ladder"
+        f" ({number(anchor_before, 1)} ms -> {number(anchor_after, 1)} ms here), because this 15 W"
+        " laptop measurably slows down after hours of sustained work: the same probe read 15.0 ms"
+        " cold and 42.5 ms after an afternoon of training runs. Absolute QPS on this box is only"
+        " meaningful with the anchor attached; the configuration *comparison* below is not.",
+        "",
+        f"**Sustained {baseline_sustained} QPS with p99 under {slo:g} ms** in the baseline"
+        f" configuration, rising to **{halved_sustained} QPS** with half the candidate set.",
+        "",
+        "\n".join(rows),
+        "\n".join(stage_rows),
+        "",
+        "### Before and after tuning",
+        "",
+        "\n".join(tuning_rows),
+        "",
+        "Both levers do what the stage breakdown predicted, and both show up where the breakdown"
+        " says they should: halving the candidate set cuts the ranking stage (it is linear in"
+        " candidates), and the user-embedding cache removes tower inference that is provably"
+        " redundant, since the tower is a pure function of the history. Neither touches the ANN"
+        " search, which was never the problem at ~0.3 ms.",
+        "",
+        "**The sustained-QPS column does not separate them, and that is a property of the"
+        " measurement rig, not of the service.** The load generator runs on the same 12-thread"
+        " laptop as the server, so above ~100 QPS the two compete for the same cores and every"
+        " configuration hits the same wall between the 100 and 125 QPS rungs. Separating capacity"
+        " properly needs the generator on a second machine; until then the honest claim is the"
+        " per-request one, where the differences are unambiguous.",
+        "",
+        "The third change bundled into `tuned` - dropping ONNX Runtime to one intra-op thread -"
+        " did not pay off: it raises per-request ranking time without buying capacity on this box."
+        " It is reported rather than quietly dropped, because a tuning table that only contains"
+        " wins is a tuning table that was not measured.",
+        "",
+        "The quality side of the candidate lever is the recall table above; the source mix is held"
+        " fixed at 50/50 across budgets (`popularity_share`) so that shrinking the budget stays a"
+        " latency change and does not silently become a retrieval change.",
+        generator_text,
+        f"![latency vs QPS](results/figures/latency_qps_baseline_{settings.dataset}.png)",
+        "",
+    ]
+    return "\n".join(parts)
 
 
 def rerank_section(rerank: dict[str, Any] | None, settings: Settings) -> str:
@@ -461,7 +579,10 @@ def published_section(
         )
 
     ours = [
-        ("this repo: LightGBM LambdaRank", dig(baselines, "models", "lgbm_lambdarank", "test", "overall")),
+        (
+            "this repo: LightGBM LambdaRank",
+            dig(baselines, "models", "lgbm_lambdarank", "test", "overall"),
+        ),
         ("this repo: DIN + DCN-v2", dig(ranker, "test", "overall")),
     ]
     for label, overall in ours:
@@ -500,8 +621,11 @@ def build(settings: Settings) -> str:
     onnx = load(settings, f"onnx_{settings.dataset}.json")
     skew = load(settings, f"skew_{settings.dataset}.json")
     seed = load(settings, f"redis_seed_{settings.dataset}.json")
-    load_baseline = load(settings, f"load_test_baseline_{settings.dataset}.json")
-    load_tuned = load(settings, f"load_test_tuned_{settings.dataset}.json")
+    load_configs = {
+        name: load(settings, f"load_test_{name}_{settings.dataset}.json")
+        for name in ("baseline", "cache_only", "candidates100_only", "tuned")
+    }
+    generator = load(settings, f"generator_comparison_{settings.dataset}.json")
     rerank = load(settings, f"rerank_{settings.dataset}.json")
     system = load(settings, "system_info.json")
     published = load(settings, "published_baselines.json")
@@ -562,7 +686,7 @@ implementation of every feature.
 
 ## Load test
 
-{load_section(load_baseline, load_tuned, settings)}
+{load_section(load_configs, generator, settings)}
 
 ## Diversity re-ranking (stretch)
 

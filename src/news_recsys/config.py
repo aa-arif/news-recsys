@@ -84,6 +84,16 @@ class Settings(BaseSettings):
     faiss_ef_construction: int = 200
     faiss_ef_search: int = 64
     retrieval_candidates: int = 200
+    #: Fraction of ``retrieval_candidates`` drawn from the "most popular right now" source
+    #: rather than the two-tower ANN. Measured in M3: on MIND-small a user-independent
+    #: recency/popularity retriever has far higher recall than the learned tower, so the
+    #: candidate set blends both (0.0 disables the popularity source).
+    #:
+    #: A *share* rather than a count, so that changing the candidate budget - which is a
+    #: latency knob - does not silently change the source mix, which is a quality decision.
+    popularity_share: float = 0.5
+    #: Size of the trending list maintained in Redis for that source.
+    popularity_list_size: int = 500
 
     # ---- ranking -----------------------------------------------------------
     ranker_epochs: int = 3
@@ -107,6 +117,10 @@ class Settings(BaseSettings):
     serve_host: str = "127.0.0.1"
     serve_port: int = 8000
     serve_default_k: int = 10
+    #: FastAPI runs sync endpoints in a thread pool. Its default (40) is far more than
+    #: this box has cores, and oversubscribing turns GIL contention into p99 latency:
+    #: queueing in the accept backlog is cheaper than queueing on the interpreter lock.
+    serve_threadpool_size: int = 8
     ort_intra_op_threads: int = 2
     ort_inter_op_threads: int = 1
     user_embedding_cache_size: int = 0  # 0 disables the cache (M6 toggles this)

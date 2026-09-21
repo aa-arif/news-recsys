@@ -6,8 +6,8 @@ Runtime and Redis - with the offline evaluation and the serving latency measured
 than asserted.
 
 Headline numbers on the sealed MIND-small test split (the official `dev`
-split, scored once): ranker AUC **TBD**, nDCG@10
-**TBD**; LightGBM LambdaRank baseline AUC
+split, scored once): ranker AUC **0.7144**, nDCG@10
+**0.4610**; LightGBM LambdaRank baseline AUC
 **0.7017**. The online feature path is verified to reproduce the
 offline one bit for bit.
 
@@ -85,7 +85,7 @@ Two measurements drove most of the modelling decisions:
 |---|---:|---:|---:|---:|---:|---:|
 | time-aware popularity | 0.6499 | 0.3103 | 0.3386 | 0.4007 | 0.1575 | 0.0102 |
 | LightGBM LambdaRank | 0.7017 | 0.3505 | 0.3902 | 0.4500 | 0.1542 | 0.0069 |
-| DIN + DCN-v2 ranker | TBD | TBD | TBD | TBD | TBD | TBD |
+| DIN + DCN-v2 ranker | 0.7144 | 0.3597 | 0.3987 | 0.4610 | 0.1496 | 0.0047 |
 
 Scored with MIND's protocol: one metric per impression, averaged over impressions.
 95% bootstrap CI over impressions for the LambdaRank AUC: [0.6998, 0.7039].
@@ -97,6 +97,7 @@ Scored with MIND's protocol: one metric per impression, averaged over impression
 |---|---:|---:|---:|---:|
 | time-aware popularity | 0.6735 | 0.4270 | 0.4111 | 0.3022 |
 | LightGBM LambdaRank | 0.7159 | 0.5673 | 0.4558 | 0.3958 |
+| DIN + DCN-v2 | 0.7232 | 0.6321 | 0.4642 | 0.4315 |
 
 80.6% of test rows and 90.4% of
 test impressions involve an article the training fold never showed
@@ -117,31 +118,155 @@ goes live at 00:05 is already warm by 09:00. Both are reported in
 
 ### Calibration
 
-Calibration: TBD
+Negatives are downsampled to 0.25 of the shown-not-clicked rows during
+ranker training, which inflates every predicted probability. The fix is a closed-form
+shift of the logit by `log(keep_rate)`; the table shows it working.
+
+| probability estimate | log loss | Brier | ECE | mean predicted | observed |
+|---|---:|---:|---:|---:|---:|
+| raw sigmoid (trained on downsampled negatives) | 0.1815 | 0.0443 | 0.06608 | 0.1067 | 0.0406 |
+| closed-form prior correction | 0.1504 | 0.0370 | 0.00846 | 0.0322 | 0.0406 |
+| prior correction + Platt (fitted on val) | 0.1496 | 0.0369 | 0.00467 | 0.0360 | 0.0406 |
+
+![ranker calibration](results/figures/calibration_ranker_small.png)
 
 
 ## Retrieval
 
-Retrieval results: TBD
+| retriever / pool | Recall@10 | Recall@50 | Recall@100 | Recall@200 | Recall@500 |
+|---|---:|---:|---:|---:|---:|
+| two-tower, full catalogue (65,238 articles) | 0.0016 | 0.0105 | 0.0179 | 0.0300 | 0.0583 |
+| two-tower, live pool (6,144), reachable clicks only | 0.0083 | 0.0448 | 0.0785 | 0.1339 | 0.2581 |
+| most-popular-now, live pool | 0.0649 | 0.1206 | 0.2166 | 0.3740 | 0.4122 |
+
+**The learned tower is not the best retriever here, and the repo ships the measured answer
+rather than the intended one.** A user-independent "most popular in the last 24h" list
+retrieves the clicked article about 12x more often than the two-tower does: news clicks are
+head-heavy and freshness-driven, and a content-only tower has no notion of recency, so it
+returns articles that are *about* the right thing and days old. The serving path therefore
+blends both sources and lets the ranker - which does have recency and CTR features - sort
+the union.
+
+Two caveats belong with that number. The tower was still improving when training stopped at
+6 CPU epochs. And recall measured against *logged* clicks rewards a retriever for
+re-finding what the previous production system already showed, so it structurally
+under-credits personalised retrieval; the mix below is treated as a product decision, not
+as something to maximise offline.
+
+Blending both sources at a fixed budget of 200 candidates (the ranker's cost is the budget, so the question is the mix, not the winner):
+
+| candidates from the trending list | Recall of the clicked article |
+|---:|---:|
+| 0 | 0.0300 |
+| 25 | 0.1038 |
+| 50 | 0.1402 |
+| 100 | 0.2306 |
+| 150 | 0.3467 |
+| all | 0.3740 |
+
+**Index freshness is the binding constraint, not the model.** Only
+75.1% of test clicks are on articles that an index built at the
+start of the test day would even contain; the rest are articles that appeared during the
+day. That ceiling, not the tower, is what caps the full-catalogue recall - which is why
+the live-pool row is reported conditioned on reachability.
+
+HNSW sweep (single-query latency, 1 thread, k=200):
+
+| efSearch | Recall@200 | overlap@100 vs exact | p50 (ms) | p95 (ms) | p99 (ms) |
+|---:|---:|---:|---:|---:|---:|
+| 16 | 0.0191 | 0.6637 | 0.035 | 0.054 | 0.083 |
+| 32 | 0.0265 | 0.8333 | 0.059 | 0.086 | 0.155 |
+| 64 | 0.0319 | 0.9458 | 0.142 | 0.179 | 0.237 |
+| 128 | 0.0302 | 0.9858 | 0.220 | 0.377 | 0.620 |
+| 256 | 0.0301 | 0.9959 | 0.486 | 0.986 | 1.214 |
+| 512 | 0.0300 | 0.9984 | 1.189 | 2.136 | 2.603 |
+
+Selected on validation: **efSearch = 32**
+(smallest p95 latency whose val recall@200 is within 1% of exact search).
+
+![recall vs latency](results/figures/recall_latency_small.png)
 
 
 ## Serving
 
-Training/serving skew check: TBD
+`scripts/check_skew.py` compared **5,426 rows x 35 features = 189,910 values** between the running server and the offline replay over 200 sampled test impressions: **identical** (max |difference| 0.0e+00).
 
-ONNX export report: TBD
+ONNX exports agree with PyTorch to 1.8e-07 (user tower) and 1.7e-06 (ranker).
 
-Redis seed report: TBD
+Redis holds 20,288 article counter rows, 50,000 user rows and 50,000 click histories (30.3 MB, 119,170 keys).
 
 
 ## Load test
 
-Load test: TBD
+Hardware: 12th Gen Intel(R) Core(TM) i5-1235U, 10 physical / 12 logical cores, 31.7 GB RAM, none (CPU-only measurements).
+Offered load is **open loop** - arrivals follow a fixed timetable, so a slow server gets a growing queue instead of a quietly reduced load. 60s per rung, k=10.
+
+Each run records a sequential **calibration anchor** before and after the ladder (13.9 ms -> 14.1 ms here), because this 15 W laptop measurably slows down after hours of sustained work: the same probe read 15.0 ms cold and 42.5 ms after an afternoon of training runs. Absolute QPS on this box is only meaningful with the anchor attached; the configuration *comparison* below is not.
+
+**Sustained 98.3 QPS with p99 under 50 ms** in the baseline configuration, rising to **98.3 QPS** with half the candidate set.
+
+| offered | achieved QPS | p50 (ms) | p95 (ms) | p99 (ms) | server p50 (ms) |
+|---:|---:|---:|---:|---:|---:|
+| 25.0 | 24.6 | 14.8 | 26.6 | 33.8 | 12.0 |
+| 50.0 | 49.2 | 14.1 | 19.1 | 30.4 | 11.4 |
+| 75.0 | 73.8 | 14.2 | 17.3 | 25.4 | 11.1 |
+| 100.0 | 98.3 | 15.5 | 22.8 | 37.8 | 12.0 |
+| 125.0 | 122.9 | 22.7 | 44.2 | 91.9 | 17.4 |
+| 150.0 | 133.3 | 174.0 | 211.9 | 234.7 | 36.7 |
+
+Where the time goes, measured inside the server at 49 QPS:
+
+| stage | p50 (ms) | p95 (ms) | p99 (ms) |
+|---|---:|---:|---:|
+| history_fetch | 1.35 | 1.92 | 2.70 |
+| user_embedding | 0.68 | 1.02 | 1.40 |
+| retrieval | 0.31 | 0.42 | 0.65 |
+| counter_fetch | 2.69 | 3.72 | 5.01 |
+| feature_build | 0.74 | 1.17 | 1.67 |
+| ranking | 5.30 | 7.96 | 11.69 |
+| postprocess | 0.15 | 0.22 | 0.32 |
+
+### Before and after tuning
+
+| configuration | sustained QPS at p99 <= 50 ms | p50 at 50 QPS (ms) | ranking stage p50 (ms) | user-embedding stage p50 (ms) |
+|---|---:|---:|---:|---:|
+| baseline (200 candidates, no cache, 2 ORT threads) | 98.3 | 14.1 | 5.30 | 0.68 |
+| + user-embedding cache | 98.3 | 14.5 | 5.61 | 0.09 |
+| + 100 candidates instead of 200 | 98.3 | 12.2 | 3.30 | 0.76 |
+| all three (cache, 100 candidates, 1 ORT thread) | 98.3 | 14.5 | 5.52 | 0.10 |
+
+Both levers do what the stage breakdown predicted, and both show up where the breakdown says they should: halving the candidate set cuts the ranking stage (it is linear in candidates), and the user-embedding cache removes tower inference that is provably redundant, since the tower is a pure function of the history. Neither touches the ANN search, which was never the problem at ~0.3 ms.
+
+**The sustained-QPS column does not separate them, and that is a property of the measurement rig, not of the service.** The load generator runs on the same 12-thread laptop as the server, so above ~100 QPS the two compete for the same cores and every configuration hits the same wall between the 100 and 125 QPS rungs. Separating capacity properly needs the generator on a second machine; until then the honest claim is the per-request one, where the differences are unambiguous.
+
+The third change bundled into `tuned` - dropping ONNX Runtime to one intra-op thread - did not pay off: it raises per-request ranking time without buying capacity on this box. It is reported rather than quietly dropped, because a tuning table that only contains wins is a tuning table that was not measured.
+
+The quality side of the candidate lever is the recall table above; the source mix is held fixed at 50/50 across budgets (`popularity_share`) so that shrinking the budget stays a latency change and does not silently become a retrieval change.
+
+### The load generator was validated before its numbers were used
+
+| offered | internal generator p50 | server's own p50 | Locust p50 |
+|---:|---:|---:|---:|
+| 25 | 14.8 ms | 11.9 ms | 79.0 ms |
+| 50 | 14.4 ms | 11.6 ms | 160.0 ms |
+
+Locust's gevent loop on this Windows box adds latency the service does not have: it reports 5-11x the latency that both an independent open-loop generator *and the server's own instrumentation* measure at the same offered rate. The reported numbers therefore come from `src/news_recsys/serving/loadgen.py`; Locust stays wired up (`--generator locust`) because it is the right tool on a Linux load box. A measurement you have not validated is a guess.
+
+![latency vs QPS](results/figures/latency_qps_baseline_small.png)
 
 
 ## Diversity re-ranking (stretch)
 
-MMR diversity trade-off: TBD
+| lambda | nDCG@10 | intra-list category diversity | mean pairwise distance |
+|---:|---:|---:|---:|
+| 1.0 | 0.4610 | 0.6066 | 0.9148 |
+| 0.9 | 0.4604 | 0.6123 | 0.9182 |
+| 0.8 | 0.4590 | 0.6191 | 0.9221 |
+| 0.7 | 0.4573 | 0.6272 | 0.9267 |
+| 0.6 | 0.4540 | 0.6366 | 0.9320 |
+| 0.5 | 0.4494 | 0.6469 | 0.9377 |
+
+![diversity trade-off](results/figures/diversity_tradeoff_small.png)
 
 
 ## Published comparisons
@@ -158,7 +283,7 @@ All numbers are percentages on the MIND-small `dev` split.
 | Prompt4NR | 68.48 | 33.29 | 37.12 | 43.25 | [2409.17711](https://arxiv.org/abs/2409.17711) |
 | UniTRec | 68.59 | 33.76 | 37.63 | 43.74 | [2409.17711](https://arxiv.org/abs/2409.17711) |
 | **this repo: LightGBM LambdaRank** | 70.17 | 35.05 | 39.02 | 45.00 | measured here |
-| **this repo: DIN + DCN-v2** | TBD | TBD | TBD | TBD | measured here |
+| **this repo: DIN + DCN-v2** | 71.44 | 35.97 | 39.87 | 46.10 | measured here |
 
 **Read this table with the caveats, not without them:**
 
@@ -206,8 +331,8 @@ code path.
 | article embeddings (65,238 articles, CPU) | 903 s |
 | feature replay (4,621,015 train rows) | 242 s |
 | LightGBM LambdaRank | 56 s |
-| two-tower (3 epochs) | 795 s |
-| DIN + DCN-v2 ranker (? cross layers) | TBD s |
+| two-tower (6 epochs) | 1468 s |
+| DIN + DCN-v2 ranker (3 cross layers) | 391 s |
 
 Machine: 12th Gen Intel(R) Core(TM) i5-1235U, 10 physical /
 12 logical cores, 31.7 GB RAM,

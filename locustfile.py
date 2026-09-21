@@ -5,6 +5,12 @@ second (``constant_throughput``), so offered load is ``users x rate`` and does n
 collapse when the server slows down - which is the failure mode of a naive closed-loop
 test, where a slow server simply receives fewer requests and looks fine.
 
+``FastHttpUser`` (geventhttpclient), not the default ``HttpUser`` (requests). Measured on
+this machine: with the requests-based client, Locust reported p50 = 93 ms at 25 QPS while
+an independent open-loop probe against the same server measured 15 ms. That gap was the
+load generator, not the service, and reporting it would have been reporting a Locust
+artifact as a system property.
+
 The per-stage timings the API returns with every response are accumulated here and
 written to JSON when the run stops, so the load test reports where the time went under
 load and not just the total.
@@ -18,7 +24,7 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from locust import HttpUser, constant_throughput, events, task
+from locust import FastHttpUser, constant_throughput, events, task
 
 USERS_FILE = Path(os.environ.get("NEWSREC_USERS_FILE", "artifacts/small/serving_users.txt"))
 STAGE_OUTPUT = Path(os.environ.get("NEWSREC_STAGE_OUTPUT", "results/logs/stage_timings.json"))
@@ -47,7 +53,7 @@ def load_user_ids() -> list[str]:
 USER_IDS = load_user_ids()
 
 
-class RecommendUser(HttpUser):
+class RecommendUser(FastHttpUser):
     wait_time = constant_throughput(RPS_PER_USER)
 
     @task

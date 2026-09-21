@@ -1,0 +1,55 @@
+{
+  "dataset": "small",
+  "host": "http://127.0.0.1:8000",
+  "duration_per_rate": "40s",
+  "server": {
+    "status": "ok",
+    "redis": true,
+    "dataset": "small",
+    "articles": 65238,
+    "index_vectors": 65238,
+    "ef_search": 64,
+    "retrieval_candidates": 200,
+    "snapshot_as_of": 1573776001.0,
+    "ort_intra_op_threads": 2,
+    "ort_inter_op_threads": 1,
+    "user_embedding_cache_size": 0,
+    "popularity_candidates": 100,
+    "serve_threadpool_size": 8
+  },
+  "comparison": [
+    {
+      "target_qps": 25,
+      "internal": {
+        "achieved_qps": 24.39608384888807,
+        "client_p50_ms": 14.808200008701533,
+        "client_p95_ms": 27.090084986411966,
+        "client_p99_ms": 40.99601298687045,
+        "server_p50_ms": 11.9125
+      },
+      "locust": {
+        "achieved_qps": 24.242302441370814,
+        "client_p50_ms": 79.0,
+        "client_p95_ms": 120.0,
+        "client_p99_ms": 150.0
+      }
+    },
+    {
+      "target_qps": 50,
+      "internal": {
+        "achieved_qps": 48.77438648601931,
+        "client_p50_ms": 14.380350010469556,
+        "client_p95_ms": 23.50491998658981,
+        "client_p99_ms": 36.077015958726406,
+        "server_p50_ms": 11.58
+      },
+      "locust": {
+        "achieved_qps": 50.376128667720266,
+        "client_p50_ms": 160.0,
+        "client_p95_ms": 190.0,
+        "client_p99_ms": 210.0
+      }
+    }
+  ],
+  "conclusion": "Locust's gevent loop on Windows adds latency the service does not have; the internal open-loop generator agrees with the server's own instrumentation, so it is used for the reported numbers."
+}

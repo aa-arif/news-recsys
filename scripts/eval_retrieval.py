@@ -100,6 +100,34 @@ def popularity_ranking(
     return pool[np.argsort(-smoothed)[:k]]
 
 
+def blended_recall(
+    ann_indices: NDArray[np.int64],
+    popular: NDArray[np.int64],
+    targets: NDArray[np.int64],
+    total_candidates: int,
+    popularity_share: int,
+) -> float:
+    """Recall of the *union* of the two candidate sources at a fixed total budget.
+
+    The serving path spends a fixed candidate budget across two sources, so the question
+    that matters is not "which retriever is better" but "what mix recalls the most for the
+    same ranker cost".
+    """
+    n_popular = min(popularity_share, total_candidates)
+    n_ann = total_candidates - n_popular
+    from_ann = (
+        (ann_indices[:, :n_ann] == targets[:, None]).any(axis=1)
+        if n_ann > 0
+        else np.zeros(targets.shape[0], dtype=bool)
+    )
+    if n_popular > 0:
+        popular_set = popular[:n_popular]
+        from_popular = np.isin(targets, popular_set)
+    else:
+        from_popular = np.zeros(targets.shape[0], dtype=bool)
+    return float((from_ann | from_popular).mean())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default=None, choices=["small", "large", "synthetic"])
@@ -208,6 +236,21 @@ def main() -> None:
             np.tile(popular, (positive.size, 1)),
             positive,
             tuple(cutoff for cutoff in cutoffs if cutoff <= popular.size),
+        )
+
+        # -- blended candidate sources at a fixed budget ----------------------
+        fold_result["blend"] = {
+            "total_candidates": candidates_k,
+            "by_popularity_share": {
+                str(share): blended_recall(exact_indices, popular, positive, candidates_k, share)
+                for share in (0, 25, 50, 100, 150, candidates_k)
+            },
+        }
+        logger.info(
+            "%s blend recall@%d by popularity share: %s",
+            fold,
+            candidates_k,
+            {k: round(v, 4) for k, v in fold_result["blend"]["by_popularity_share"].items()},
         )
 
         # -- HNSW sweep ------------------------------------------------------

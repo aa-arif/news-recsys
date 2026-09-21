@@ -48,10 +48,38 @@ SOURCES = {
 
 #: Values are percentages exactly as printed in the cited tables.
 PUBLISHED = [
-    {"model": "NAML", "auc": 66.12, "mrr": 31.53, "ndcg@5": 34.88, "ndcg@10": 41.09, "source": "digat"},
-    {"model": "LSTUR", "auc": 65.87, "mrr": 30.78, "ndcg@5": 33.95, "ndcg@10": 40.15, "source": "digat"},
-    {"model": "NRMS", "auc": 65.63, "mrr": 30.96, "ndcg@5": 34.13, "ndcg@10": 40.52, "source": "digat"},
-    {"model": "DIGAT", "auc": 68.77, "mrr": 33.46, "ndcg@5": 37.14, "ndcg@10": 43.39, "source": "digat"},
+    {
+        "model": "NAML",
+        "auc": 66.12,
+        "mrr": 31.53,
+        "ndcg@5": 34.88,
+        "ndcg@10": 41.09,
+        "source": "digat",
+    },
+    {
+        "model": "LSTUR",
+        "auc": 65.87,
+        "mrr": 30.78,
+        "ndcg@5": 33.95,
+        "ndcg@10": 40.15,
+        "source": "digat",
+    },
+    {
+        "model": "NRMS",
+        "auc": 65.63,
+        "mrr": 30.96,
+        "ndcg@5": 34.13,
+        "ndcg@10": 40.52,
+        "source": "digat",
+    },
+    {
+        "model": "DIGAT",
+        "auc": 68.77,
+        "mrr": 33.46,
+        "ndcg@5": 37.14,
+        "ndcg@10": 43.39,
+        "source": "digat",
+    },
     {
         "model": "BERT-NRMS",
         "auc": 68.60,

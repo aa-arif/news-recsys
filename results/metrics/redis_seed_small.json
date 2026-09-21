@@ -5,11 +5,12 @@
   "users": 50000,
   "categories": 18,
   "subcategories": 270,
-  "counter_seconds": 0.8153495999868028,
+  "counter_seconds": 0.8115251999697648,
+  "popular_articles": 500,
   "histories": 50000,
-  "history_seconds": 2.488942199968733,
+  "history_seconds": 3.0457528000115417,
   "history_fold": "test",
-  "redis_used_memory_mb": 30.25,
-  "redis_keys": 119169,
-  "seeded_at": 1789934660.824623
+  "redis_used_memory_mb": 30.32,
+  "redis_keys": 119170,
+  "seeded_at": 1789935495.975049
 }

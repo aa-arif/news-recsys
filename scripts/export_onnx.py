@@ -6,7 +6,7 @@ import argparse
 
 import numpy as np
 
-from news_recsys.config import get_settings
+from news_recsys.config import Settings, get_settings
 from news_recsys.io_utils import write_json
 from news_recsys.logging_utils import get_logger
 from news_recsys.models.onnx_export import export_ranker, export_user_tower
@@ -16,7 +16,7 @@ from news_recsys.models.two_tower import TwoTowerModel
 logger = get_logger("scripts.export_onnx")
 
 
-def real_ranker_batch(settings: object) -> dict[str, np.ndarray] | None:
+def real_ranker_batch(settings: Settings) -> dict[str, np.ndarray] | None:
     """One real validation impression, for a meaningful export check (see export_ranker)."""
     try:
         from news_recsys.data.sequences import build_impression_histories

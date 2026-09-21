@@ -21,6 +21,7 @@ from news_recsys.serving.redis_store import (
     ARTICLE_PREFIX,
     CATEGORY_PREFIX,
     HISTORY_PREFIX,
+    POPULAR_KEY,
     SUBCATEGORY_PREFIX,
     USER_PREFIX,
     ArticleStatic,
@@ -121,6 +122,40 @@ def seed_counters(
 
 
 USERS_FILENAME = "serving_users.txt"
+
+
+def seed_popularity(
+    client: Any,
+    store: TimeAwareFeatureStore,
+    settings: Settings,
+    as_of: float,
+    *,
+    limit: int | None = None,
+) -> int:
+    """Write the trending list: articles ranked by smoothed, decayed CTR at ``as_of``.
+
+    M3 measured that this user-independent source retrieves the clicked article far more
+    often than the two-tower does on MIND-small, so the serving path blends both rather
+    than pretending the learned retriever is enough. Only articles active in the last 24h
+    are eligible - an article nobody has seen for days is not "trending".
+    """
+    limit = limit or settings.popularity_list_size
+    active = np.flatnonzero(
+        (store.article_last_seen > 0) & ((as_of - store.article_last_seen) <= 24 * 3600)
+    ).astype(np.int64)
+    if active.size == 0:
+        return 0
+
+    decayed_impressions, decayed_clicks = store.decayed(active, as_of)
+    smoothed = (decayed_clicks[:, 0] + settings.ctr_prior_clicks) / (
+        decayed_impressions[:, 0] + settings.ctr_prior_clicks + settings.ctr_prior_impressions
+    )
+    ranked = active[np.argsort(-smoothed)][:limit]
+
+    client.delete(POPULAR_KEY)
+    if ranked.size:
+        client.rpush(POPULAR_KEY, *[int(index) for index in ranked])
+    return int(ranked.size)
 
 
 def seed_histories(

@@ -13,7 +13,6 @@ queueing plus HTTP overhead, and a run where the server says 8 ms while the clie
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import subprocess
@@ -28,39 +27,11 @@ from news_recsys.config import get_settings
 from news_recsys.io_utils import write_json
 from news_recsys.logging_utils import get_logger
 from news_recsys.plots import plot_latency_vs_qps, plot_stage_latency
+from news_recsys.serving.loadgen import read_locust_stats, run_open_loop, sequential_anchor
 
 logger = get_logger("scripts.load_test")
 
 DEFAULT_LADDER = (10, 25, 50, 100, 150, 200, 300)
-
-
-def read_locust_stats(prefix: Path) -> dict[str, Any]:
-    """Parse the aggregated row of Locust's ``*_stats.csv``."""
-    path = prefix.with_name(prefix.name + "_stats.csv")
-    with path.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-    aggregated = next((row for row in rows if row.get("Name") == "Aggregated"), rows[-1])
-
-    def number(*names: str) -> float:
-        for name in names:
-            value = aggregated.get(name)
-            if value not in (None, "", "N/A"):
-                try:
-                    return float(value)
-                except ValueError:
-                    continue
-        return float("nan")
-
-    return {
-        "requests": int(number("Request Count")),
-        "failures": int(number("Failure Count")),
-        "achieved_qps": number("Requests/s"),
-        "client_p50_ms": number("50%", "50%ile"),
-        "client_p95_ms": number("95%", "95%ile"),
-        "client_p99_ms": number("99%", "99%ile"),
-        "client_mean_ms": number("Average Response Time"),
-        "client_max_ms": number("Max Response Time"),
-    }
 
 
 def run_locust(
@@ -129,6 +100,12 @@ def main() -> None:
     parser.add_argument("--slo-ms", type=float, default=50.0)
     parser.add_argument("--label", default="baseline", help="name for this configuration")
     parser.add_argument("--warmup-requests", type=int, default=50)
+    parser.add_argument(
+        "--generator",
+        default="internal",
+        choices=["internal", "locust"],
+        help="internal = the validated open-loop generator; locust = the gevent one",
+    )
     args = parser.parse_args()
 
     settings = get_settings(dataset=args.dataset) if args.dataset else get_settings()
@@ -144,27 +121,48 @@ def main() -> None:
         for user_id in sample_users:  # warm caches, page in the index, JIT the ORT graph
             client.get("/recommend", params={"user_id": user_id, "k": args.k})
 
+    all_user_ids = users_file.read_text(encoding="utf-8").split()
+    anchor_before = sequential_anchor(args.host, all_user_ids, k=args.k)
+    logger.info(
+        "anchor before: sequential p50 %.1f ms (server %.1f ms)",
+        anchor_before["client_p50_ms"],
+        anchor_before["server_p50_ms"],
+    )
+
     ladder = [int(value) for value in args.ladder.split(",") if value.strip()]
     points: list[dict[str, Any]] = []
     logs = settings.results_dir / "logs"
+
+    all_users = users_file.read_text(encoding="utf-8").split()
+    seconds = float(args.duration.rstrip("s"))
 
     for target_qps in ladder:
         users = max(round(target_qps / args.rps_per_user), 1)
         prefix = logs / f"locust_{args.label}_{target_qps}"
         stage_output = logs / f"stages_{args.label}_{target_qps}.json"
-        logger.info("target %d QPS (%d users x %.1f rps)", target_qps, users, args.rps_per_user)
-        stats = run_locust(
-            host=args.host,
-            users=users,
-            rps_per_user=args.rps_per_user,
-            duration=args.duration,
-            prefix=prefix,
-            stage_output=stage_output,
-            users_file=users_file,
-            as_of=None,
-            k=args.k,
-        )
-        stats.update({"target_qps": target_qps, "users": users, "qps": stats["achieved_qps"]})
+        logger.info("target %d QPS (generator: %s)", target_qps, args.generator)
+        if args.generator == "locust":
+            stats = run_locust(
+                host=args.host,
+                users=users,
+                rps_per_user=args.rps_per_user,
+                duration=args.duration,
+                prefix=prefix,
+                stage_output=stage_output,
+                users_file=users_file,
+                as_of=None,
+                k=args.k,
+            )
+            stats.update({"target_qps": target_qps, "users": users, "qps": stats["achieved_qps"]})
+        else:
+            stats = run_open_loop(
+                args.host,
+                all_users,
+                target_qps=float(target_qps),
+                duration_seconds=seconds,
+                k=args.k,
+            ).to_dict()
+            stats["users"] = users
         points.append(stats)
         logger.info(
             "  achieved %.1f QPS | client p50 %.1f p95 %.1f p99 %.1f ms | failures %d",
@@ -175,6 +173,13 @@ def main() -> None:
             stats["failures"],
         )
         time.sleep(2)  # let the server drain between rungs
+
+    anchor_after = sequential_anchor(args.host, all_user_ids, k=args.k)
+    logger.info(
+        "anchor after: sequential p50 %.1f ms (server %.1f ms)",
+        anchor_after["client_p50_ms"],
+        anchor_after["server_p50_ms"],
+    )
 
     within_slo = [
         point
@@ -191,9 +196,12 @@ def main() -> None:
         "label": args.label,
         "host": args.host,
         "duration_per_rung": args.duration,
+        "generator": args.generator,
         "slo_ms": args.slo_ms,
         "k": args.k,
         "ladder": points,
+        "anchor_before": anchor_before,
+        "anchor_after": anchor_after,
         "max_qps_within_slo": best["achieved_qps"] if best else None,
         "max_qps_rung": best["target_qps"] if best else None,
         "server_stats": server_stats,

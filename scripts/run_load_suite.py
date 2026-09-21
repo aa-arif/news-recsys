@@ -26,30 +26,37 @@ from news_recsys.plots import plot_latency_vs_qps
 
 logger = get_logger("scripts.load_suite")
 
+# Which knobs are worth turning was decided by the idle per-stage breakdown, not by
+# guesswork: ranking 200 candidates costs ~15 ms of a ~28 ms request, the two Redis round
+# trips ~8 ms, and the ANN search only ~0.7 ms - so efSearch is not where the time is.
 CONFIGURATIONS: dict[str, dict[str, str]] = {
-    # The straight path: no caching, the efSearch M3 selected, ORT with 2 intra-op threads.
+    # The straight path: no caching, 200 candidates, ORT with 2 intra-op threads.
     "baseline": {
         "NEWSREC_USER_EMBEDDING_CACHE_SIZE": "0",
         "NEWSREC_ORT_INTRA_OP_THREADS": "2",
+        "NEWSREC_RETRIEVAL_CANDIDATES": "200",
     },
-    # Three changes measured together and, in the report, one at a time.
-    "tuned": {
-        "NEWSREC_USER_EMBEDDING_CACHE_SIZE": "50000",
-        "NEWSREC_ORT_INTRA_OP_THREADS": "1",
-        "NEWSREC_FAISS_EF_SEARCH": "32",
-    },
+    # One change at a time, so the tuned result can be attributed.
     "cache_only": {
         "NEWSREC_USER_EMBEDDING_CACHE_SIZE": "50000",
         "NEWSREC_ORT_INTRA_OP_THREADS": "2",
+        "NEWSREC_RETRIEVAL_CANDIDATES": "200",
     },
-    "threads_only": {
-        "NEWSREC_USER_EMBEDDING_CACHE_SIZE": "0",
-        "NEWSREC_ORT_INTRA_OP_THREADS": "1",
-    },
-    "ef32_only": {
+    "candidates100_only": {
         "NEWSREC_USER_EMBEDDING_CACHE_SIZE": "0",
         "NEWSREC_ORT_INTRA_OP_THREADS": "2",
-        "NEWSREC_FAISS_EF_SEARCH": "32",
+        "NEWSREC_RETRIEVAL_CANDIDATES": "100",
+    },
+    "threads1_only": {
+        "NEWSREC_USER_EMBEDDING_CACHE_SIZE": "0",
+        "NEWSREC_ORT_INTRA_OP_THREADS": "1",
+        "NEWSREC_RETRIEVAL_CANDIDATES": "200",
+    },
+    # Everything together.
+    "tuned": {
+        "NEWSREC_USER_EMBEDDING_CACHE_SIZE": "50000",
+        "NEWSREC_ORT_INTRA_OP_THREADS": "1",
+        "NEWSREC_RETRIEVAL_CANDIDATES": "100",
     },
 }
 
@@ -108,17 +115,22 @@ def main() -> None:
     parser.add_argument("--dataset", default=None, choices=["small", "large", "synthetic"])
     parser.add_argument("--configs", default="baseline,tuned")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--duration", default="45s")
-    parser.add_argument("--ladder", default="10,25,50,100,150,200,300")
+    parser.add_argument("--duration", default="40s")
+    parser.add_argument("--ladder", default="25,50,75,100,150,200")
     parser.add_argument("--rps-per-user", type=float, default=2.0)
     parser.add_argument("--slo-ms", type=float, default=50.0)
     parser.add_argument("--k", type=int, default=10)
+    parser.add_argument("--generator", default="internal", choices=["internal", "locust"])
     args = parser.parse_args()
 
     settings = get_settings(dataset=args.dataset) if args.dataset else get_settings()
     settings.ensure_dirs()
     host = f"http://127.0.0.1:{args.port}"
-    summary: dict[str, Any] = {"dataset": settings.dataset, "configurations": {}}
+    summary: dict[str, Any] = {
+        "dataset": settings.dataset,
+        "generator": args.generator,
+        "configurations": {},
+    }
     series: dict[str, list[dict[str, Any]]] = {}
 
     for name in [item.strip() for item in args.configs.split(",") if item.strip()]:
@@ -152,6 +164,8 @@ def main() -> None:
                 str(args.k),
                 "--label",
                 name,
+                "--generator",
+                args.generator,
             ]
             result = subprocess.run(command, check=False)
             if result.returncode != 0:

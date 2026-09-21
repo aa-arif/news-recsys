@@ -1,0 +1,81 @@
+{
+  "dataset": "small",
+  "fold": "test",
+  "k": 10,
+  "points": [
+    {
+      "lambda": 1.0,
+      "auc": 0.7144369993607201,
+      "mrr": 0.3596766782136108,
+      "ndcg@5": 0.39866164990306513,
+      "ndcg@10": 0.461036768531879,
+      "diversity": 0.6066001244202113,
+      "mean_pairwise_distance": 0.9148324761591043,
+      "impressions": 73152
+    },
+    {
+      "lambda": 0.9,
+      "auc": 0.7138309404193496,
+      "mrr": 0.3593636916125681,
+      "ndcg@5": 0.3978936060968311,
+      "ndcg@10": 0.4603652634178465,
+      "diversity": 0.6123087858375342,
+      "mean_pairwise_distance": 0.9182016694919755,
+      "impressions": 73152
+    },
+    {
+      "lambda": 0.8,
+      "auc": 0.7126583520816078,
+      "mrr": 0.35857180444253556,
+      "ndcg@5": 0.39686525619319646,
+      "ndcg@10": 0.4590018228449252,
+      "diversity": 0.6191425019355219,
+      "mean_pairwise_distance": 0.9221065640054878,
+      "impressions": 73152
+    },
+    {
+      "lambda": 0.7,
+      "auc": 0.7105972904878374,
+      "mrr": 0.35754807284175355,
+      "ndcg@5": 0.3952564965401159,
+      "ndcg@10": 0.4573159822918254,
+      "diversity": 0.6272407084097126,
+      "mean_pairwise_distance": 0.9266957201367048,
+      "impressions": 73152
+    },
+    {
+      "lambda": 0.6,
+      "auc": 0.7064636517440525,
+      "mrr": 0.35575701949742783,
+      "ndcg@5": 0.39244069006467225,
+      "ndcg@10": 0.4539642155473133,
+      "diversity": 0.6366116073598439,
+      "mean_pairwise_distance": 0.9319627805995148,
+      "impressions": 73152
+    },
+    {
+      "lambda": 0.5,
+      "auc": 0.6995368032615189,
+      "mrr": 0.35296862068144663,
+      "ndcg@5": 0.3880633179189509,
+      "ndcg@10": 0.44943236985716567,
+      "diversity": 0.6469421519792665,
+      "mean_pairwise_distance": 0.937743962307345,
+      "impressions": 73152
+    }
+  ],
+  "baseline_lambda_1": {
+    "lambda": 1.0,
+    "auc": 0.7144369993607201,
+    "mrr": 0.3596766782136108,
+    "ndcg@5": 0.39866164990306513,
+    "ndcg@10": 0.461036768531879,
+    "diversity": 0.6066001244202113,
+    "mean_pairwise_distance": 0.9148324761591043,
+    "impressions": 73152
+  },
+  "note": "MMR is applied to the logged slate, so nDCG stays comparable with the ranker's own numbers; lambda is a product decision and is deliberately not tuned here.",
+  "figures": {
+    "diversity_tradeoff": "results\\figures\\diversity_tradeoff_small.png"
+  }
+}
