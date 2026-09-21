@@ -1,0 +1,126 @@
+{
+  "dataset": "small",
+  "examples": 512,
+  "distinct_targets": 327,
+  "catalogue": 65238,
+  "epochs": 300,
+  "batch_size": 128,
+  "learning_rate": 0.003,
+  "dropout": 0.0,
+  "chance_recall@10": 0.0001532848953064165,
+  "final": {
+    "epoch": 300,
+    "seconds": 148.38540070003364,
+    "train_recall@1": 0.890625,
+    "train_recall@10": 0.9921875,
+    "train_recall@100": 1.0,
+    "loss": 0.308358334004879
+  },
+  "curve": [
+    {
+      "epoch": 0,
+      "seconds": 0.49601120001170784,
+      "train_recall@1": 0.0,
+      "train_recall@10": 0.0,
+      "train_recall@100": 0.0,
+      "loss": 4.101223468780518
+    },
+    {
+      "epoch": 25,
+      "seconds": 10.112192600034177,
+      "train_recall@1": 0.00390625,
+      "train_recall@10": 0.037109375,
+      "train_recall@100": 0.1171875,
+      "loss": 1.1904154419898987
+    },
+    {
+      "epoch": 50,
+      "seconds": 17.605267300037667,
+      "train_recall@1": 0.083984375,
+      "train_recall@10": 0.248046875,
+      "train_recall@100": 0.666015625,
+      "loss": 0.40808942914009094
+    },
+    {
+      "epoch": 75,
+      "seconds": 26.028638600022532,
+      "train_recall@1": 0.39453125,
+      "train_recall@10": 0.845703125,
+      "train_recall@100": 0.974609375,
+      "loss": 0.33582916110754013
+    },
+    {
+      "epoch": 100,
+      "seconds": 35.89196909999009,
+      "train_recall@1": 0.587890625,
+      "train_recall@10": 0.931640625,
+      "train_recall@100": 0.998046875,
+      "loss": 0.3252233862876892
+    },
+    {
+      "epoch": 125,
+      "seconds": 46.81440030003432,
+      "train_recall@1": 0.70703125,
+      "train_recall@10": 0.96875,
+      "train_recall@100": 1.0,
+      "loss": 0.3406505510210991
+    },
+    {
+      "epoch": 150,
+      "seconds": 58.79967740003485,
+      "train_recall@1": 0.759765625,
+      "train_recall@10": 0.982421875,
+      "train_recall@100": 1.0,
+      "loss": 0.31958163529634476
+    },
+    {
+      "epoch": 175,
+      "seconds": 71.41529889998492,
+      "train_recall@1": 0.80859375,
+      "train_recall@10": 0.982421875,
+      "train_recall@100": 1.0,
+      "loss": 0.33344343677163124
+    },
+    {
+      "epoch": 200,
+      "seconds": 86.2704861999955,
+      "train_recall@1": 0.83984375,
+      "train_recall@10": 0.98828125,
+      "train_recall@100": 1.0,
+      "loss": 0.31448863446712494
+    },
+    {
+      "epoch": 225,
+      "seconds": 102.04164880001917,
+      "train_recall@1": 0.794921875,
+      "train_recall@10": 0.986328125,
+      "train_recall@100": 1.0,
+      "loss": 0.29607999324798584
+    },
+    {
+      "epoch": 250,
+      "seconds": 117.20597889996134,
+      "train_recall@1": 0.875,
+      "train_recall@10": 0.986328125,
+      "train_recall@100": 1.0,
+      "loss": 0.3384295552968979
+    },
+    {
+      "epoch": 275,
+      "seconds": 132.4686071999604,
+      "train_recall@1": 0.880859375,
+      "train_recall@10": 0.984375,
+      "train_recall@100": 1.0,
+      "loss": 0.308358334004879
+    },
+    {
+      "epoch": 300,
+      "seconds": 148.38540070003364,
+      "train_recall@1": 0.890625,
+      "train_recall@10": 0.9921875,
+      "train_recall@100": 1.0,
+      "loss": 0.308358334004879
+    }
+  ],
+  "verdict": "model can memorise the subset: the architecture, loss and index plumbing are sound, so low validation recall is a generalisation/capacity/training-budget problem"
+}

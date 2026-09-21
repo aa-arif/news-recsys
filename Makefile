@@ -68,7 +68,7 @@ baselines: ## time-aware popularity + LightGBM LambdaRank
 	$(PY) scripts/train_baselines.py --dataset $(DATASET)
 
 # --- M3: retrieval ----------------------------------------------------------
-.PHONY: m3 two-tower index retrieval
+.PHONY: m3 two-tower index retrieval retrieval-fresh overfit-check
 m3: two-tower index retrieval ## milestone 3: two-tower -> FAISS HNSW -> recall/latency
 
 two-tower: ## train the two-tower model (in-batch softmax + logQ correction)
@@ -79,6 +79,12 @@ index: ## build the FAISS HNSW index over item vectors
 
 retrieval: ## Recall@K over the full catalogue + efSearch sweep
 	$(PY) scripts/eval_retrieval.py --dataset $(DATASET)
+
+retrieval-fresh: ## Recall@K with the candidate pool rebuilt per impression (24h/48h)
+	$(PY) scripts/eval_retrieval_fresh.py --dataset $(DATASET)
+
+overfit-check: ## can the two-tower memorise a tiny subset? (rules out a bug)
+	$(PY) scripts/sanity_overfit.py --dataset $(DATASET)
 
 # --- M4: ranking ------------------------------------------------------------
 .PHONY: m4 ranker

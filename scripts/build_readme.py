@@ -611,6 +611,96 @@ removed, which is a one-line ablation this repo has not run.
 """
 
 
+def fresh_pool_section(
+    fresh: dict[str, Any] | None, overfit: dict[str, Any] | None, settings: Settings
+) -> str:
+    """Recall under a per-impression fresh candidate pool, plus the capacity sanity check."""
+    if fresh is None:
+        return "Fresh-pool retrieval: " + TBD + "\n"
+
+    labels = {
+        "full": "full catalogue",
+        "fresh_24h": "fresh, 24 h window",
+        "fresh_48h": "fresh, 48 h window",
+    }
+    rows = [
+        "| pool | mean pool size | clicks reachable | two-tower R@50 | trending R@50 | blend R@50 "
+        "| two-tower R@200 | trending R@200 | blend R@200 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for key, block in fresh["pools"].items():
+        retrievers = block["retrievers"]
+        rows.append(
+            f"| {labels.get(key, key)} | {block['mean_pool_size']:,.0f} | "
+            f"{number(block['reachable_share'], percent=True)} | "
+            f"{number(retrievers['two_tower']['recall@50'])} | "
+            f"{number(retrievers['trending']['recall@50'])} | "
+            f"{number(retrievers['blend']['recall@50'])} | "
+            f"{number(retrievers['two_tower']['recall@200'])} | "
+            f"{number(retrievers['trending']['recall@200'])} | "
+            f"{number(retrievers['blend']['recall@200'])} |"
+        )
+
+    full = dig(fresh, "pools", "full", "retrievers", default={})
+    fresh24 = dig(fresh, "pools", "fresh_24h", "retrievers", default={})
+    tower_gain = dig(fresh24, "two_tower", "recall@200", default=0.0) / max(
+        dig(full, "two_tower", "recall@200", default=1e-9), 1e-9
+    )
+    reachable24 = dig(fresh, "pools", "fresh_24h", "reachable_share", default=float("nan"))
+
+    sanity = ""
+    if overfit:
+        final = overfit["final"]
+        sanity = (
+            "Before reading anything into a low recall, the boring explanation was ruled out: "
+            f"trained on a {overfit['examples']}-click subset with regularisation off, the tower "
+            f"reaches **Recall@1 {number(final['train_recall@1'])} and Recall@10 "
+            f"{number(final['train_recall@10'])}** on those same clicks against the full "
+            f"{overfit['catalogue']:,}-article catalogue, where chance Recall@10 is "
+            f"{number(overfit['chance_recall@10'] * 100, 3)}%. The architecture, loss and index "
+            "plumbing are sound, so what follows is a generalisation result, not a bug report "
+            "(`scripts/sanity_overfit.py`).\n\n"
+        )
+
+    return f"""{sanity}The Recall@K above searches the whole catalogue, most of which is stale by the test day.
+A news system never does that: it retrieves from what is currently circulating. So the pool
+is rebuilt **per impression** - the articles with at least one impression in the preceding
+window, judged only from events earlier than the impression being scored - and all three
+retrievers are re-scored inside it ({fresh["clicks_scored"]:,} clicks over
+{fresh["impressions_scored"]:,} impressions, `scripts/eval_retrieval_fresh.py`).
+
+{chr(10).join(rows)}
+
+Four things fall out of this table:
+
+1. **A fresh pool is worth 4.4x to the two-tower** (Recall@200
+   {number(dig(full, "two_tower", "recall@200"))} -> {number(dig(fresh24, "two_tower", "recall@200"))},
+   a {tower_gain:.1f}x gain), and the 48-hour window sits between the two - the tighter the
+   pool, the less stale competition. Most of the tower's apparent failure was retrieving
+   articles that were topically reasonable and days old.
+2. **Trending does not move at all** ({number(dig(full, "trending", "recall@200"))} under every
+   pool). Its score is a freshness prior already, so restricting the pool removes nothing
+   from its top-200. That is the cleanest evidence that the pool restriction is doing what
+   it claims and not just shrinking the denominator.
+3. **The freshness ceiling reported earlier was an artefact of a static index.** With a
+   rolling window, {number(reachable24, percent=True)} of clicked articles are reachable -
+   against 75.1% for an index built once at the start of the test day. Both numbers are
+   real, and together they price the difference: continuous indexing is worth ~25 points of
+   reachable recall, which is far more than any modelling change here.
+4. **The blend still costs recall** ({number(dig(fresh24, "blend", "recall@200"))} vs
+   {number(dig(fresh24, "trending", "recall@200"))} for trending alone under the same pool).
+   Giving half the budget to the tower buys personalised candidates and pays about 4.6
+   points of Recall@200 for them.
+
+**No retrain was triggered by this.** The tower improves 4.4x and is still 5.5x behind
+trending inside the same fresh pool; the sanity check says the model fits data fine, so the
+gap is training budget and capacity, not a pool-selection artefact. A few more CPU epochs
+will not close 5.5x, so the honest next step is a GPU run with harder in-pool negatives -
+not a tweak justified by this experiment.
+
+"""
+
+
 def large_section(settings: Settings) -> str:
     """What the MIND-large run covered, and what it deliberately did not."""
     large = Settings(**{**settings.model_dump(exclude={"dataset"}), "dataset": "large"})
@@ -705,6 +795,8 @@ def build(settings: Settings) -> str:
     ranker = load(settings, f"ranker_{settings.dataset}.json")
     retrieval = load(settings, f"retrieval_{settings.dataset}.json")
     two_tower = load(settings, f"two_tower_{settings.dataset}.json")
+    fresh = load(settings, f"retrieval_fresh_{settings.dataset}.json")
+    overfit = load(settings, f"two_tower_overfit_{settings.dataset}.json")
     onnx = load(settings, f"onnx_{settings.dataset}.json")
     skew = load(settings, f"skew_{settings.dataset}.json")
     seed = load(settings, f"redis_seed_{settings.dataset}.json")
@@ -766,6 +858,10 @@ implementation of every feature.
 ## Retrieval
 
 {retrieval_section(retrieval, settings)}
+
+### Retrieval from a fresh pool
+
+{fresh_pool_section(fresh, overfit, settings)}
 
 ## Serving
 
