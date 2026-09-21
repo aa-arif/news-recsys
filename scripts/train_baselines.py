@@ -7,6 +7,7 @@ both chosen there. The test fold is scored once, at the end.
 from __future__ import annotations
 
 import argparse
+import gc
 import time
 from typing import Any
 
@@ -14,7 +15,7 @@ import numpy as np
 
 from news_recsys.config import get_settings, seed_everything
 from news_recsys.eval.runner import evaluate_predictions
-from news_recsys.features.build import load_fold_features
+from news_recsys.features.build import load_fold_features, subsample_negatives
 from news_recsys.features.vocab import load_vocabulary
 from news_recsys.io_utils import write_json
 from news_recsys.logging_utils import get_logger, timed
@@ -30,6 +31,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default=None, choices=["small", "large", "synthetic"])
     parser.add_argument("--num-boost-round", type=int, default=600)
+    parser.add_argument(
+        "--train-negative-rate",
+        type=float,
+        default=1.0,
+        help="fraction of shown-not-clicked TRAINING rows to keep (evaluation is unaffected)",
+    )
     args = parser.parse_args()
 
     settings = get_settings(dataset=args.dataset) if args.dataset else get_settings()
@@ -84,9 +91,25 @@ def main() -> None:
 
     # -- baseline 2: LightGBM LambdaRank -----------------------------------
     model = LambdaRankModel(settings=settings, vocabulary=vocabulary)
+    training_fold = subsample_negatives(
+        folds["train"], args.train_negative_rate, seed=settings.seed
+    )
+    if args.train_negative_rate < 1.0:
+        logger.info(
+            "training LambdaRank on %d of %d rows (negatives kept at %.2f)",
+            training_fold.labels.size,
+            folds["train"].labels.size,
+            args.train_negative_rate,
+        )
+    training_rows = training_fold.labels.size
     with timed(logger, "LightGBM LambdaRank") as lgbm_timing:
-        model.fit(folds["train"], folds["val"], num_boost_round=args.num_boost_round)
+        model.fit(training_fold, folds["val"], num_boost_round=args.num_boost_round)
     model.save(settings.artifact_dir)
+
+    # The training design matrix is the biggest object in the process; drop it before
+    # scoring so the largest dataset variant does not need both at once.
+    del training_fold
+    gc.collect()
 
     lgbm_scores = {}
     inference_seconds = {}
@@ -104,6 +127,8 @@ def main() -> None:
         "model": "lightgbm_lambdarank",
         "params": model.params,
         "best_iteration": model.best_iteration,
+        "train_negative_rate": args.train_negative_rate,
+        "train_rows_used": int(training_rows),
         "train_seconds": lgbm_timing["seconds"],
         "inference_seconds": inference_seconds,
         "rows_per_second_test": float(

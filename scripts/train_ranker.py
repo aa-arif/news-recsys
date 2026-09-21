@@ -199,14 +199,16 @@ def main() -> None:
         means["ndcg@5"],
         means["ndcg@10"],
     )
-    cold = results["test"]["cold_start"]
-    logger.info(
-        "cold impressions AUC=%.4f (n=%d) | warm AUC=%.4f (n=%d)",
-        cold["cold_impressions"].get("auc", float("nan")),
-        cold["cold_impressions"].get("n_impressions", 0),
-        cold["warm_impressions"].get("auc", float("nan")),
-        cold["warm_impressions"].get("n_impressions", 0),
-    )
+    for definition, slices in results["test"]["cold_start"].items():
+        cold, warm = slices["cold"], slices["warm"]
+        logger.info(
+            "%-20s cold AUC=%.4f (n=%d) | warm AUC=%.4f (n=%d)",
+            definition,
+            cold.get("auc", float("nan")),
+            cold.get("n_impressions", 0),
+            warm.get("auc", float("nan")),
+            warm.get("n_impressions", 0),
+        )
 
 
 if __name__ == "__main__":

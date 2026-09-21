@@ -1,0 +1,64 @@
+{
+  "dataset": "large",
+  "seconds": 2696.5028807999915,
+  "folds": {
+    "train": {
+      "rows": 66107268,
+      "features": 35,
+      "positives": 2712612,
+      "path": "C:\\Users\\arif6\\projects\\news-recsys\\artifacts\\large\\features\\features_train.npz",
+      "megabytes": 10402.4
+    },
+    "val": {
+      "rows": 17400106,
+      "features": 35,
+      "positives": 671044,
+      "path": "C:\\Users\\arif6\\projects\\news-recsys\\artifacts\\large\\features\\features_val.npz",
+      "megabytes": 2738.0
+    },
+    "test": {
+      "rows": 14085557,
+      "features": 35,
+      "positives": 574845,
+      "path": "C:\\Users\\arif6\\projects\\news-recsys\\artifacts\\large\\features\\features_test.npz",
+      "megabytes": 2216.5
+    }
+  },
+  "feature_names": [
+    "art_impr_log1p",
+    "art_click_log1p",
+    "art_ctr_smooth",
+    "art_impr_decay_1h_log1p",
+    "art_ctr_decay_1h",
+    "art_impr_decay_6h_log1p",
+    "art_ctr_decay_6h",
+    "art_impr_decay_24h_log1p",
+    "art_ctr_decay_24h",
+    "art_age_hours_log1p",
+    "art_hours_since_last_impr_log1p",
+    "art_is_cold",
+    "cat_ctr_smooth",
+    "cat_impr_log1p",
+    "subcat_ctr_smooth",
+    "subcat_impr_log1p",
+    "user_impr_log1p",
+    "user_click_log1p",
+    "user_ctr_smooth",
+    "user_hours_since_last_impr_log1p",
+    "user_history_len_log1p",
+    "user_is_cold",
+    "user_cat_affinity",
+    "text_sim_hist_mean",
+    "text_sim_hist_max",
+    "text_sim_hist_last",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "is_weekend",
+    "title_len_log1p",
+    "abstract_len_log1p",
+    "n_title_entities_log1p",
+    "n_abstract_entities_log1p"
+  ]
+}

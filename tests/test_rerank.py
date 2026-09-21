@@ -27,7 +27,9 @@ def clustered_candidates(seed: int = 0) -> tuple[np.ndarray, np.ndarray, np.ndar
             categories.append(cluster)
     embeddings_array = np.asarray(embeddings, dtype=np.float32)
     # The most relevant items are all in cluster 0, so a pure-relevance top-5 is degenerate.
-    scores = np.concatenate([np.linspace(1.0, 0.8, 6), np.linspace(0.5, 0.3, 6), np.linspace(0.4, 0.2, 6)])
+    scores = np.concatenate(
+        [np.linspace(1.0, 0.8, 6), np.linspace(0.5, 0.3, 6), np.linspace(0.4, 0.2, 6)]
+    )
     return scores, embeddings_array, np.asarray(categories, dtype=np.int64)
 
 

@@ -269,6 +269,43 @@ Locust's gevent loop on this Windows box adds latency the service does not have:
 ![diversity trade-off](results/figures/diversity_tradeoff_small.png)
 
 
+## MIND-large
+
+Everything below ran with `make DATASET=large ...` - the only difference from the
+MIND-small run is `NEWSREC_DATASET`.
+
+| fold | impressions | labelled rows | users | distinct articles |
+|---|---:|---:|---:|---:|
+| train | 1,801,231 | 66,107,268 | 654,870 | 23,291 |
+| val | 431,517 | 17,400,106 | 286,814 | 9,107 |
+| test | 376,471 | 14,085,557 | 255,990 | 6,997 |
+
+Cold start is milder at this size but still dominant: 57.8%
+of test articles, 71.7% of test rows and
+77.7% of test clicks are articles no training
+impression contained.
+
+**Stages that ran on MIND-large:**
+
+* data: download, parse, folds, statistics (104,151 articles)
+* embeddings: 104,151 articles in 1062 s on CPU (98.1/s)
+* features: ordered replay over 97,592,931 rows in 2697 s
+* baselines: LightGBM LambdaRank test AUC 0.7090, nDCG@10 0.4600 (negatives subsampled to 0.20 for training only, so the design matrix fits in RAM)
+* ranker: DIN + DCN-v2, 2 epochs in 4139 s, test AUC 0.7244, nDCG@10 0.4711
+
+Same code, same hyperparameters, 11x the data - and both models improve
+(ranker 0.7144 -> 0.7244 AUC), which is the sanity check that the scale-up is real
+rather than a plumbing exercise.
+
+**The one stage that did not run:** the two-tower was not trained at this size. At the rate
+measured on MIND-small that is roughly 4.5 hours of CPU, so there is no MIND-large retrieval
+row rather than an estimated one - this repo does not publish numbers it did not produce.
+
+One code change was needed, and it is a scale lesson rather than a config one: the feature
+replay used to allocate all three matrices in RAM (~14 GB here, next to a 97M-row event
+table), and now writes them through a memmap.
+
+
 ## Published comparisons
 
 All numbers are percentages on the MIND-small `dev` split.

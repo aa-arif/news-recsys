@@ -1,0 +1,14 @@
+{
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "dim": 384,
+  "articles": 104151,
+  "max_tokens": 96,
+  "batch_size": 256,
+  "device": "cpu",
+  "vocab_seconds": 5.098199600004591,
+  "embed_seconds": 1061.97964949999,
+  "articles_per_second": 98.07250077629757,
+  "users": 750434,
+  "categories": 18,
+  "subcategories": 285
+}

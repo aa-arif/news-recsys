@@ -82,6 +82,29 @@ class FoldFeatures:
         )
 
 
+def subsample_negatives(fold: FoldFeatures, rate: float, *, seed: int = 42) -> FoldFeatures:
+    """Keep every positive and ``rate`` of the negatives, preserving impression order.
+
+    Used for the largest dataset variant, where the full design matrix does not fit
+    alongside LightGBM's binned copy. Groups survive because the rows of one impression are
+    contiguous and sampling does not reorder them.
+    """
+    if rate >= 1.0:
+        return fold
+    rng = np.random.default_rng(seed)
+    keep = (fold.labels > 0) | (rng.random(fold.labels.shape[0]) < rate)
+    return FoldFeatures(
+        fold=fold.fold,
+        features=np.ascontiguousarray(fold.features[keep]),
+        labels=fold.labels[keep],
+        impression_key=fold.impression_key[keep],
+        news_index=fold.news_index[keep],
+        user_index=fold.user_index[keep],
+        timestamp=fold.timestamp[keep],
+        names=fold.names,
+    )
+
+
 def _article_static(news: pl.DataFrame) -> dict[str, NDArray[np.float64]]:
     return {
         "title_chars": news["title"].str.len_chars().to_numpy().astype(np.float64),
@@ -161,8 +184,17 @@ def build_features(
         vocabulary, embeddings, settings, article_static=_article_static(news)
     )
 
+    # Written through a memmap rather than allocated in RAM: on MIND-large these three
+    # matrices total ~14 GB, which does not fit next to the event table on a 32 GB box.
+    scratch = settings.artifact_dir / "features"
+    scratch.mkdir(parents=True, exist_ok=True)
     outputs: dict[str, NDArray[np.float32]] = {
-        fold: np.empty((int((event_fold == fold).sum()), len(names)), dtype=np.float32)
+        fold: np.lib.format.open_memmap(
+            scratch / f"_replay_{fold}.npy",
+            mode="w+",
+            dtype=np.float32,
+            shape=(int((event_fold == fold).sum()), len(names)),
+        )
         for fold in FOLDS
     }
     cursors: dict[str, int] = dict.fromkeys(FOLDS, 0)
@@ -192,6 +224,12 @@ def build_features(
 
     if not snapshot_written:  # datasets without a test fold (not expected, but be explicit)
         save_snapshot(store, settings, as_of=float(event_ts[-1]))
+
+    for matrix in outputs.values():
+        # open_memmap returns a memmap, which the NDArray annotation does not capture.
+        flush = getattr(matrix, "flush", None)
+        if flush is not None:
+            flush()
 
     results: dict[str, FoldFeatures] = {}
     for fold in FOLDS:
